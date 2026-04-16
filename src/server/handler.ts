@@ -1,0 +1,351 @@
+import type { Request, Response } from 'express';
+import type { RuntimeAdapter, UnifiedEvent } from '@inharness/agent-adapters';
+import { createAdapter, listArchitectures, getModelsForArchitecture } from '@inharness/agent-adapters';
+import type {
+  ArchitectureConfig,
+  ServerConfig,
+  StoredMessage,
+  StoredContentBlock,
+} from './protocol.js';
+import { serializeSSE, unifiedEventToWire } from './serialize.js';
+import { validateChatRequest } from './validate.js';
+import { SessionManager } from './session-manager.js';
+import { ThreadStore } from './thread-store.js';
+
+export interface ChatHandlerConfig {
+  architectures?: Record<string, ArchitectureConfig>;
+  defaultArchitecture?: string;
+  systemPrompt: string;
+  maxConcurrentRequests?: number;
+  threadsDir?: string;
+  cwd?: string;
+  onEvent?: (event: UnifiedEvent, requestId: string) => void;
+}
+
+export interface ChatHandler {
+  handleChat: (req: Request, res: Response) => Promise<void>;
+  handleAbort: (req: Request, res: Response) => void;
+  handleConfig: (req: Request, res: Response) => void;
+  handleListThreads: (req: Request, res: Response) => void;
+  handleGetThread: (req: Request, res: Response) => void;
+  handleCreateThread: (req: Request, res: Response) => void;
+  handleDeleteThread: (req: Request, res: Response) => void;
+  handleUpdateThread: (req: Request, res: Response) => void;
+  destroy: () => void;
+}
+
+export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
+  const sessions = new SessionManager();
+  const threads = new ThreadStore(config.threadsDir ?? './threads');
+  const maxConcurrent = config.maxConcurrentRequests ?? 10;
+  const architectures = config.architectures ?? buildDefaultArchitectures();
+  const defaultArchitecture = config.defaultArchitecture ?? Object.keys(architectures)[0];
+  const validArchitectures = Object.keys(architectures);
+
+  const handleChat = async (req: Request, res: Response): Promise<void> => {
+    // Validate
+    const validation = validateChatRequest(req.body, validArchitectures);
+    if (!validation.ok) {
+      res.status(400).json({ errors: validation.errors });
+      return;
+    }
+
+    // Check concurrency
+    if (sessions.size >= maxConcurrent) {
+      res.status(429).json({ error: 'Too many concurrent requests' });
+      return;
+    }
+
+    const chatReq = validation.data;
+    const architecture = chatReq.architecture ?? defaultArchitecture;
+    const archConfig = architectures[architecture];
+    const model = chatReq.model ?? archConfig.default;
+    const requestId = crypto.randomUUID();
+
+    // Auto-create thread if threadId not provided
+    let threadId = chatReq.threadId;
+    if (!threadId) {
+      threadId = crypto.randomUUID();
+      const title = chatReq.prompt.slice(0, 60).trim() + (chatReq.prompt.length > 60 ? '...' : '');
+      threads.create(threadId, title, architecture, model);
+    }
+
+    // Create adapter
+    let adapter: RuntimeAdapter;
+    try {
+      adapter = createAdapter(architecture);
+    } catch (err) {
+      res.status(500).json({ error: `Failed to create ${architecture} adapter: ${(err as Error).message}` });
+      return;
+    }
+
+    sessions.register(requestId, adapter, architecture);
+
+    // SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    // Send connected event with requestId and threadId
+    res.write(serializeSSE('connected', { requestId, threadId }));
+
+    // Abort on client disconnect
+    res.on('close', () => {
+      sessions.abort(requestId);
+    });
+
+    // Collect messages for thread persistence
+    const userMessage: StoredMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      blocks: [{ type: 'text', text: chatReq.prompt }],
+      timestamp: new Date().toISOString(),
+    };
+
+    const assistantBlocks: StoredContentBlock[] = [];
+    const subagentMessages = new Map<string, StoredMessage[]>();
+    let resultSessionId: string | undefined;
+
+    // Look up existing session for resumption
+    const existingThread = threads.get(threadId);
+    const sessionId = chatReq.sessionId ?? existingThread?.sessionId;
+
+    let eventId = 0;
+    try {
+      const stream = adapter.execute({
+        prompt: chatReq.prompt,
+        systemPrompt: chatReq.systemPrompt ?? config.systemPrompt,
+        model,
+        resumeSessionId: sessionId,
+        maxTurns: chatReq.maxTurns,
+        allowedTools: chatReq.allowedTools,
+        cwd: config.cwd ?? process.cwd(),
+        architectureConfig: chatReq.architectureConfig,
+      });
+
+      for await (const event of stream) {
+        config.onEvent?.(event, requestId);
+
+        const wireEvent = unifiedEventToWire(event as UnifiedEvent & Record<string, unknown>);
+        res.write(serializeSSE(wireEvent.type, wireEvent, ++eventId));
+
+        // Collect blocks for persistence
+        collectBlock(event, assistantBlocks, subagentMessages);
+
+        if (event.type === 'result') {
+          resultSessionId = (event as { sessionId?: string }).sessionId;
+          sessions.setSessionId(requestId, resultSessionId!);
+        }
+      }
+    } catch (err) {
+      const wireError = {
+        type: 'error' as const,
+        error: (err as Error).message ?? String(err),
+        code: 'UNKNOWN',
+      };
+      res.write(serializeSSE('error', wireError, ++eventId));
+    } finally {
+      res.write(serializeSSE('done', {}, ++eventId));
+      res.end();
+      sessions.remove(requestId);
+
+      // Persist to thread
+      const assistantMessage: StoredMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        blocks: assistantBlocks,
+        timestamp: new Date().toISOString(),
+      };
+      threads.appendMessages(threadId!, [userMessage, assistantMessage], resultSessionId);
+    }
+  };
+
+  const handleAbort = (req: Request, res: Response): void => {
+    const { requestId } = req.body as { requestId?: string };
+    if (!requestId || typeof requestId !== 'string') {
+      res.status(400).json({ error: 'requestId is required' });
+      return;
+    }
+    const aborted = sessions.abort(requestId);
+    if (aborted) {
+      res.json({ ok: true });
+    } else {
+      res.status(404).json({ error: 'No active request with that ID' });
+    }
+  };
+
+  const handleConfig = (_req: Request, res: Response): void => {
+    const serverConfig: ServerConfig = {
+      architectures: architectures,
+      defaultArchitecture: defaultArchitecture,
+    };
+    res.json(serverConfig);
+  };
+
+  const handleListThreads = (_req: Request, res: Response): void => {
+    res.json(threads.list());
+  };
+
+  const handleGetThread = (req: Request, res: Response): void => {
+    const id = req.params.id as string;
+    const thread = threads.get(id);
+    if (!thread) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+    res.json(thread);
+  };
+
+  const handleCreateThread = (req: Request, res: Response): void => {
+    const { title, architecture, model } = req.body as {
+      title?: string;
+      architecture?: string;
+      model?: string;
+    };
+
+    const arch = architecture ?? defaultArchitecture;
+    if (!validArchitectures.includes(arch)) {
+      res.status(400).json({ error: `Invalid architecture: ${arch}` });
+      return;
+    }
+
+    const archConfig = architectures[arch];
+    const mdl = model ?? archConfig.default;
+    const id = crypto.randomUUID();
+    const thread = threads.create(id, title ?? 'New conversation', arch, mdl);
+
+    res.status(201).json({
+      id: thread.id,
+      title: thread.title,
+      architecture: thread.architecture,
+      model: thread.model,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+    });
+  };
+
+  const handleDeleteThread = (req: Request, res: Response): void => {
+    const deleted = threads.delete(req.params.id as string);
+    if (deleted) {
+      res.json({ ok: true });
+    } else {
+      res.status(404).json({ error: 'Thread not found' });
+    }
+  };
+
+  const handleUpdateThread = (req: Request, res: Response): void => {
+    const { title } = req.body as { title?: string };
+    if (!title || typeof title !== 'string') {
+      res.status(400).json({ error: 'title is required' });
+      return;
+    }
+
+    const updated = threads.update(req.params.id as string, { title });
+    if (!updated) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+
+    res.json({
+      id: updated.id,
+      title: updated.title,
+      architecture: updated.architecture,
+      model: updated.model,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    });
+  };
+
+  const destroy = (): void => {
+    sessions.destroy();
+  };
+
+  return {
+    handleChat,
+    handleAbort,
+    handleConfig,
+    handleListThreads,
+    handleGetThread,
+    handleCreateThread,
+    handleDeleteThread,
+    handleUpdateThread,
+    destroy,
+  };
+}
+
+// --- Default architecture config from @inharness/agent-adapters ---
+
+function buildDefaultArchitectures(): Record<string, ArchitectureConfig> {
+  const result: Record<string, ArchitectureConfig> = {};
+  for (const arch of listArchitectures()) {
+    const models = getModelsForArchitecture(arch);
+    if (models && models.length > 0) {
+      result[arch] = {
+        models: models.map(m => m.alias),
+        default: models[0].alias,
+      };
+    }
+  }
+  return result;
+}
+
+// --- Helpers for collecting blocks during streaming ---
+
+function collectBlock(
+  event: UnifiedEvent,
+  blocks: StoredContentBlock[],
+  _subagentMessages: Map<string, StoredMessage[]>,
+): void {
+  switch (event.type) {
+    case 'text_delta': {
+      const e = event as { text: string; isSubagent: boolean };
+      if (e.isSubagent) return; // subagent text handled via assistant_message
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === 'text') {
+        last.text += e.text;
+      } else {
+        blocks.push({ type: 'text', text: e.text });
+      }
+      break;
+    }
+    case 'thinking': {
+      const e = event as { text: string; isSubagent: boolean };
+      if (e.isSubagent) return;
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === 'thinking') {
+        last.text += e.text;
+      } else {
+        blocks.push({ type: 'thinking', text: e.text });
+      }
+      break;
+    }
+    case 'tool_use': {
+      const e = event as { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean };
+      if (e.isSubagent) return;
+      blocks.push({ type: 'toolUse', toolUseId: e.toolUseId, toolName: e.toolName, input: e.input });
+      break;
+    }
+    case 'tool_result': {
+      const e = event as { toolUseId: string; summary: string };
+      blocks.push({ type: 'toolResult', toolUseId: e.toolUseId, content: e.summary });
+      break;
+    }
+    case 'subagent_started': {
+      const e = event as { taskId: string; description: string };
+      blocks.push({ type: 'subagent', taskId: e.taskId, description: e.description, status: 'running', messages: [] });
+      break;
+    }
+    case 'subagent_completed': {
+      const e = event as { taskId: string; status: string; summary?: string };
+      const sub = blocks.find(b => b.type === 'subagent' && b.taskId === e.taskId) as StoredContentBlock & { type: 'subagent' } | undefined;
+      if (sub) {
+        sub.status = e.status;
+        sub.summary = e.summary;
+      }
+      break;
+    }
+  }
+}

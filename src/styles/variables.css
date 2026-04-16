@@ -1,0 +1,96 @@
+/* @inharness/agent-chat — Theme variables */
+/* Override any --ac-* variable to customize the look */
+
+:root,
+[data-ac-theme="light"] {
+  /* Layout */
+  --ac-chat-max-width: 900px;
+  --ac-chat-height: 100vh;
+  --ac-chat-padding: 1rem;
+  --ac-message-gap: 0.75rem;
+  --ac-border-radius: 8px;
+  --ac-border-radius-sm: 4px;
+  --ac-sidebar-width: 280px;
+
+  /* Colors — Background */
+  --ac-bg-primary: #ffffff;
+  --ac-bg-secondary: #f7f7f8;
+  --ac-bg-assistant: #f4f4f6;
+  --ac-bg-user: #e8e0ff;
+  --ac-bg-tool: #f5f3ff;
+  --ac-bg-thinking: #fffbeb;
+  --ac-bg-error: #fef2f2;
+  --ac-bg-subagent: #f0fdf4;
+  --ac-bg-code: #1e1e2e;
+  --ac-bg-input: #ffffff;
+  --ac-bg-sidebar: #f9fafb;
+  --ac-bg-hover: #f0f0f2;
+  --ac-bg-active: #e8e5ff;
+
+  /* Colors — Text */
+  --ac-text-primary: #1a1a1a;
+  --ac-text-secondary: #6b7280;
+  --ac-text-muted: #9ca3af;
+  --ac-text-code: #e0def4;
+  --ac-text-error: #dc2626;
+  --ac-text-inverse: #ffffff;
+
+  /* Colors — Border */
+  --ac-border-color: #e5e7eb;
+  --ac-border-focus: #7c3aed;
+
+  /* Colors — Accent */
+  --ac-accent: #7c3aed;
+  --ac-accent-hover: #6d28d9;
+  --ac-accent-light: #ede9fe;
+
+  /* Typography */
+  --ac-font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ac-font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --ac-font-size-base: 0.9375rem;
+  --ac-font-size-sm: 0.8125rem;
+  --ac-font-size-xs: 0.75rem;
+  --ac-font-size-code: 0.875rem;
+  --ac-line-height: 1.6;
+
+  /* Transitions */
+  --ac-transition-fast: 150ms ease;
+  --ac-transition-normal: 250ms ease;
+
+  /* Shadows */
+  --ac-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --ac-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+}
+
+[data-ac-theme="dark"] {
+  --ac-bg-primary: #0f0f14;
+  --ac-bg-secondary: #1a1a24;
+  --ac-bg-assistant: #1e1e2a;
+  --ac-bg-user: #2d2652;
+  --ac-bg-tool: #1e1a2e;
+  --ac-bg-thinking: #2a2510;
+  --ac-bg-error: #2a1010;
+  --ac-bg-subagent: #0f2a18;
+  --ac-bg-code: #0d0d14;
+  --ac-bg-input: #1a1a24;
+  --ac-bg-sidebar: #14141e;
+  --ac-bg-hover: #24243a;
+  --ac-bg-active: #2d2652;
+
+  --ac-text-primary: #e4e4e8;
+  --ac-text-secondary: #9ca3af;
+  --ac-text-muted: #6b7280;
+  --ac-text-code: #e0def4;
+  --ac-text-error: #f87171;
+  --ac-text-inverse: #0f0f14;
+
+  --ac-border-color: #2a2a3a;
+  --ac-border-focus: #8b5cf6;
+
+  --ac-accent: #8b5cf6;
+  --ac-accent-hover: #a78bfa;
+  --ac-accent-light: #1e1a2e;
+
+  --ac-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --ac-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+}
