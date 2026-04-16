@@ -22,6 +22,7 @@ export class ThreadStore {
           title: data.title,
           architecture: data.architecture,
           model: data.model,
+          ...(data.cwd && { cwd: data.cwd }),
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         });
@@ -43,13 +44,16 @@ export class ThreadStore {
     }
   }
 
-  create(id: string, title: string, architecture: string, model: string): StoredThread {
+  create(id: string, title: string, architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number }): StoredThread {
     const now = new Date().toISOString();
     const thread: StoredThread = {
       id,
       title,
       architecture,
       model,
+      ...(opts?.cwd && { cwd: opts.cwd }),
+      ...(opts?.systemPrompt && { systemPrompt: opts.systemPrompt }),
+      ...(opts?.maxTurns && { maxTurns: opts.maxTurns }),
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -58,7 +62,7 @@ export class ThreadStore {
     return thread;
   }
 
-  update(id: string, updates: Partial<Pick<StoredThread, 'title' | 'sessionId' | 'messages' | 'architecture' | 'model'>>): StoredThread | null {
+  update(id: string, updates: Partial<Pick<StoredThread, 'title' | 'sessionId' | 'messages' | 'architecture' | 'model' | 'systemPrompt' | 'maxTurns'>>): StoredThread | null {
     const thread = this.get(id);
     if (!thread) return null;
 

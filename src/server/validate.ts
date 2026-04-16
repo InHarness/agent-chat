@@ -44,6 +44,11 @@ export function validateChatRequest(body: unknown, validArchitectures: string[])
     errors.push({ field: 'sessionId', message: 'sessionId must be a string' });
   }
 
+  // cwd — optional string
+  if (b.cwd !== undefined && typeof b.cwd !== 'string') {
+    errors.push({ field: 'cwd', message: 'cwd must be a string' });
+  }
+
   // maxTurns — optional positive integer
   if (b.maxTurns !== undefined && (typeof b.maxTurns !== 'number' || b.maxTurns < 1)) {
     errors.push({ field: 'maxTurns', message: 'maxTurns must be a positive number' });
@@ -63,6 +68,7 @@ export function validateChatRequest(body: unknown, validArchitectures: string[])
       maxTurns: b.maxTurns as number | undefined,
       allowedTools: b.allowedTools as string[] | undefined,
       architectureConfig: b.architectureConfig as Record<string, unknown> | undefined,
+      cwd: b.cwd as string | undefined,
     },
   };
 }

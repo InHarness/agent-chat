@@ -1,3 +1,4 @@
+import { resolve } from 'path';
 import type { Request, Response } from 'express';
 import type { RuntimeAdapter, UnifiedEvent } from '@inharness/agent-adapters';
 import { createAdapter, listArchitectures, getModelsForArchitecture } from '@inharness/agent-adapters';
@@ -67,7 +68,11 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     if (!threadId) {
       threadId = crypto.randomUUID();
       const title = chatReq.prompt.slice(0, 60).trim() + (chatReq.prompt.length > 60 ? '...' : '');
-      threads.create(threadId, title, architecture, model);
+      threads.create(threadId, title, architecture, model, {
+        cwd: chatReq.cwd ? resolve(chatReq.cwd) : undefined,
+        systemPrompt: chatReq.systemPrompt,
+        maxTurns: chatReq.maxTurns,
+      });
     }
 
     // Create adapter
@@ -113,16 +118,31 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const existingThread = threads.get(threadId);
     const sessionId = chatReq.sessionId ?? existingThread?.sessionId;
 
+    // Resolve per-request options with thread → request → server fallbacks
+    const effectiveCwd = existingThread?.cwd ?? (chatReq.cwd ? resolve(chatReq.cwd) : undefined) ?? config.cwd ?? process.cwd();
+    const effectiveSystemPrompt = chatReq.systemPrompt ?? existingThread?.systemPrompt ?? config.systemPrompt;
+    const effectiveMaxTurns = chatReq.maxTurns ?? existingThread?.maxTurns;
+
+    // Persist editable fields (systemPrompt, maxTurns) for existing threads
+    if (existingThread) {
+      const updates: Record<string, unknown> = {};
+      if (chatReq.systemPrompt !== undefined) updates.systemPrompt = chatReq.systemPrompt;
+      if (chatReq.maxTurns !== undefined) updates.maxTurns = chatReq.maxTurns;
+      if (Object.keys(updates).length > 0) {
+        threads.update(threadId, updates as { systemPrompt?: string; maxTurns?: number });
+      }
+    }
+
     let eventId = 0;
     try {
       const stream = adapter.execute({
         prompt: chatReq.prompt,
-        systemPrompt: chatReq.systemPrompt ?? config.systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         model,
         resumeSessionId: sessionId,
-        maxTurns: chatReq.maxTurns,
+        maxTurns: effectiveMaxTurns,
         allowedTools: chatReq.allowedTools,
-        cwd: config.cwd ?? process.cwd(),
+        cwd: effectiveCwd,
         architectureConfig: chatReq.architectureConfig,
       });
 
@@ -181,6 +201,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const serverConfig: ServerConfig = {
       architectures: architectures,
       defaultArchitecture: defaultArchitecture,
+      defaultCwd: config.cwd ?? process.cwd(),
     };
     res.json(serverConfig);
   };
@@ -200,10 +221,13 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   };
 
   const handleCreateThread = (req: Request, res: Response): void => {
-    const { title, architecture, model } = req.body as {
+    const { title, architecture, model, cwd, systemPrompt, maxTurns } = req.body as {
       title?: string;
       architecture?: string;
       model?: string;
+      cwd?: string;
+      systemPrompt?: string;
+      maxTurns?: number;
     };
 
     const arch = architecture ?? defaultArchitecture;
@@ -215,13 +239,18 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const archConfig = architectures[arch];
     const mdl = model ?? archConfig.default;
     const id = crypto.randomUUID();
-    const thread = threads.create(id, title ?? 'New conversation', arch, mdl);
+    const thread = threads.create(id, title ?? 'New conversation', arch, mdl, {
+      cwd: cwd ? resolve(cwd) : undefined,
+      systemPrompt,
+      maxTurns,
+    });
 
     res.status(201).json({
       id: thread.id,
       title: thread.title,
       architecture: thread.architecture,
       model: thread.model,
+      cwd: thread.cwd,
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,
     });
@@ -254,6 +283,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       title: updated.title,
       architecture: updated.architecture,
       model: updated.model,
+      cwd: updated.cwd,
       createdAt: updated.createdAt,
       updatedAt: updated.updatedAt,
     });

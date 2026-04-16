@@ -4,6 +4,7 @@ import { useAgentChat } from '../hooks/useAgentChat.js';
 import { ChatContainer } from './ChatContainer.js';
 import { InputArea } from './InputArea.js';
 import { ConfigBar } from './ConfigBar.js';
+import { AdvancedOptions } from './AdvancedOptions.js';
 import { ThreadList } from './ThreadList.js';
 import { ErrorDisplay } from './ErrorDisplay.js';
 import { UsageDisplay } from './UsageDisplay.js';
@@ -36,14 +37,27 @@ export function AgentChat({
       )}
       <div data-ac="chat-main">
         {showConfigBar && (
-          <ConfigBar
-            config={chat.config}
-            architecture={chat.architecture}
-            model={chat.model}
-            onArchitectureChange={chat.setArchitecture}
-            onModelChange={chat.setModel}
-            disabled={chat.isStreaming}
-          />
+          <>
+            <ConfigBar
+              config={chat.config}
+              architecture={chat.architecture}
+              model={chat.model}
+              onArchitectureChange={chat.setArchitecture}
+              onModelChange={chat.setModel}
+              disabled={chat.isStreaming}
+            />
+            <AdvancedOptions
+              cwd={chat.cwd}
+              onCwdChange={chat.setCwd}
+              defaultCwd={chat.defaultCwd}
+              activeCwd={chat.activeCwd}
+              systemPrompt={chat.systemPrompt}
+              onSystemPromptChange={chat.setSystemPrompt}
+              maxTurns={chat.maxTurns}
+              onMaxTurnsChange={chat.setMaxTurns}
+              disabled={chat.isStreaming}
+            />
+          </>
         )}
         <ChatContainer
           messages={chat.messages}

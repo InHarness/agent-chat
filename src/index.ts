@@ -13,6 +13,7 @@ export { ToolResultBlock } from './components/ToolResultBlock.js';
 export { ImageBlock } from './components/ImageBlock.js';
 export { SubagentPanel } from './components/SubagentPanel.js';
 export { ConfigBar } from './components/ConfigBar.js';
+export { AdvancedOptions } from './components/AdvancedOptions.js';
 export { ThreadList } from './components/ThreadList.js';
 export { ThreadItem } from './components/ThreadItem.js';
 export { InputArea } from './components/InputArea.js';

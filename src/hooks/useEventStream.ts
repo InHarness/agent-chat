@@ -12,7 +12,7 @@ export function useEventStream(options: StreamOptions) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef<string | null>(null);
 
-  const startStream = useCallback(async (request: Omit<ChatRequest, 'systemPrompt'>) => {
+  const startStream = useCallback(async (request: ChatRequest) => {
     // Abort any existing stream
     abortControllerRef.current?.abort();
 

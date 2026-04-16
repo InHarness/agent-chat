@@ -47,6 +47,7 @@ export interface ChatRequest {
   maxTurns?: number;
   allowedTools?: string[];
   architectureConfig?: Record<string, unknown>;
+  cwd?: string;
 }
 
 // --- Config ---
@@ -59,6 +60,7 @@ export interface ArchitectureConfig {
 export interface ServerConfig {
   architectures: Record<string, ArchitectureConfig>;
   defaultArchitecture: string;
+  defaultCwd: string;
 }
 
 // --- Threads ---
@@ -68,6 +70,7 @@ export interface ThreadMeta {
   title: string;
   architecture: string;
   model: string;
+  cwd?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +96,9 @@ export interface StoredThread {
   architecture: string;
   model: string;
   sessionId?: string;
+  cwd?: string;
+  systemPrompt?: string;
+  maxTurns?: number;
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];

@@ -5,6 +5,7 @@ export function useAgentConfig(serverUrl: string) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [architecture, setArchitectureState] = useState<string>('');
   const [model, setModelState] = useState<string>('');
+  const [defaultCwd, setDefaultCwd] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -22,6 +23,7 @@ export function useAgentConfig(serverUrl: string) {
         setArchitectureState(data.defaultArchitecture);
         const archConfig = data.architectures[data.defaultArchitecture];
         setModelState(archConfig?.default ?? archConfig?.models[0] ?? '');
+        setDefaultCwd(data.defaultCwd ?? '');
         setError(null);
       } catch (err) {
         if (!cancelled) setError(err as Error);
@@ -52,6 +54,7 @@ export function useAgentConfig(serverUrl: string) {
     config,
     architecture,
     model,
+    defaultCwd,
     setArchitecture,
     setModel,
     loading,

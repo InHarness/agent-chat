@@ -197,6 +197,102 @@
   border-color: var(--ac-border-focus);
 }
 
+/* === Advanced Options === */
+
+[data-ac="advanced-options"] {
+  border-bottom: 1px solid var(--ac-border-color);
+  background: var(--ac-bg-secondary);
+}
+
+[data-ac="advanced-toggle"] {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem var(--ac-chat-padding);
+  background: none;
+  border: none;
+  font-size: var(--ac-font-size-xs);
+  color: var(--ac-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+}
+
+[data-ac="advanced-toggle"]:hover {
+  color: var(--ac-text-primary);
+}
+
+[data-ac="advanced-chevron"] {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 0.65rem;
+}
+
+[data-ac="advanced-chevron"][data-expanded="true"] {
+  transform: rotate(90deg);
+}
+
+[data-ac="advanced-panel"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0 var(--ac-chat-padding) 0.5rem;
+}
+
+[data-ac="advanced-field"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+[data-ac="advanced-label"] {
+  font-size: var(--ac-font-size-xs);
+  color: var(--ac-text-secondary);
+  font-weight: 500;
+}
+
+[data-ac="advanced-input"] {
+  background: var(--ac-bg-input);
+  border: 1px solid var(--ac-border-color);
+  border-radius: var(--ac-border-radius-sm);
+  padding: 0.25rem 0.5rem;
+  font-size: var(--ac-font-size-sm);
+  font-family: inherit;
+  color: var(--ac-text-primary);
+  outline: none;
+}
+
+[data-ac="advanced-input"][data-ac-mono="true"] {
+  font-family: var(--ac-font-mono, monospace);
+}
+
+[data-ac="advanced-input"]:focus {
+  border-color: var(--ac-border-focus);
+}
+
+[data-ac="advanced-input"]:read-only {
+  opacity: 0.7;
+  cursor: default;
+}
+
+[data-ac="advanced-textarea"] {
+  background: var(--ac-bg-input);
+  border: 1px solid var(--ac-border-color);
+  border-radius: var(--ac-border-radius-sm);
+  padding: 0.35rem 0.5rem;
+  font-size: var(--ac-font-size-sm);
+  font-family: inherit;
+  color: var(--ac-text-primary);
+  outline: none;
+  resize: vertical;
+  min-height: 2.5rem;
+}
+
+[data-ac="advanced-textarea"]:focus {
+  border-color: var(--ac-border-focus);
+}
+
 /* === Chat Container === */
 
 [data-ac="chat-container"] {
