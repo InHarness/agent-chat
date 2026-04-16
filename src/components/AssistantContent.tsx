@@ -12,6 +12,28 @@ interface AssistantContentProps {
 }
 
 export function AssistantContent({ blocks }: AssistantContentProps) {
+  // Build maps for pairing toolUse ↔ toolResult ↔ subagent by toolUseId
+  const resultByToolUseId = new Map<string, { content: string; isError: boolean; collapsed: boolean }>();
+  const subagentByToolUseId = new Map<string, UIContentBlock & { type: 'subagent' }>();
+  const pairedToolUseIds = new Set<string>();
+
+  for (const block of blocks) {
+    if (block.type === 'toolResult') {
+      resultByToolUseId.set(block.toolUseId, { content: block.content, isError: block.isError, collapsed: block.collapsed });
+    }
+    if (block.type === 'subagent' && block.toolUseId) {
+      subagentByToolUseId.set(block.toolUseId, block);
+    }
+  }
+
+  // Mark which toolUseIds have a matching toolUse block (for skipping standalone renders)
+  for (const block of blocks) {
+    if (block.type === 'toolUse') {
+      if (resultByToolUseId.has(block.toolUseId)) pairedToolUseIds.add(block.toolUseId);
+      if (subagentByToolUseId.has(block.toolUseId)) pairedToolUseIds.add(block.toolUseId);
+    }
+  }
+
   return (
     <div data-ac="assistant-content">
       {blocks.map((block, i) => {
@@ -21,13 +43,19 @@ export function AssistantContent({ blocks }: AssistantContentProps) {
             return <TextBlock key={key} text={block.text} isStreaming={block.isStreaming} />;
           case 'thinking':
             return <ThinkingBlock key={key} text={block.text} isStreaming={block.isStreaming} defaultCollapsed={block.collapsed} />;
-          case 'toolUse':
-            return <ToolUseBlock key={key} toolName={block.toolName} toolUseId={block.toolUseId} input={block.input} defaultCollapsed={block.collapsed} />;
+          case 'toolUse': {
+            const result = resultByToolUseId.get(block.toolUseId);
+            const subagent = subagentByToolUseId.get(block.toolUseId);
+            return <ToolUseBlock key={key} toolName={block.toolName} toolUseId={block.toolUseId} input={block.input} defaultCollapsed={block.collapsed} result={result} subagent={subagent} />;
+          }
           case 'toolResult':
+            if (pairedToolUseIds.has(block.toolUseId)) return null;
             return <ToolResultBlock key={key} toolUseId={block.toolUseId} content={block.content} isError={block.isError} defaultCollapsed={block.collapsed} />;
           case 'image':
             return <ImageBlock key={key} source={block.source} />;
           case 'subagent':
+            // Skip if paired with a toolUse block
+            if (block.toolUseId && pairedToolUseIds.has(block.toolUseId)) return null;
             return <SubagentPanel key={key} taskId={block.taskId} description={block.description} status={block.status} summary={block.summary} messages={block.messages} />;
           default:
             return null;

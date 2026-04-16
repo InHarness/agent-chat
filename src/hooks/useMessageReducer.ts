@@ -110,7 +110,7 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
       return handleToolUse(state, event);
 
     case 'tool_result':
-      return handleToolResult(state, event.toolUseId, event.summary);
+      return handleToolResult(state, event.toolUseId, event.summary, event.isSubagent);
 
     case 'assistant_message':
       return state; // We build from deltas, don't need to replace
@@ -160,7 +160,9 @@ function handleTextDelta(state: ChatState, text: string, isSubagent: boolean): C
 }
 
 function handleThinking(state: ChatState, text: string, isSubagent: boolean): ChatState {
-  if (isSubagent) return state; // Skip subagent thinking for now
+  if (isSubagent) {
+    return routeStreamingBlockToSubagent(state, 'thinking', text);
+  }
 
   return updateActiveMessage(state, (blocks) => {
     const last = blocks[blocks.length - 1];
@@ -172,7 +174,15 @@ function handleThinking(state: ChatState, text: string, isSubagent: boolean): Ch
 }
 
 function handleToolUse(state: ChatState, event: { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean }): ChatState {
-  if (event.isSubagent) return state;
+  if (event.isSubagent) {
+    return routeBlockToSubagent(state, {
+      type: 'toolUse' as const,
+      toolUseId: event.toolUseId,
+      toolName: event.toolName,
+      input: event.input,
+      collapsed: true,
+    }, true);
+  }
 
   return updateActiveMessage(state, (blocks) => {
     // Finalize any streaming text/thinking blocks
@@ -186,12 +196,16 @@ function handleToolUse(state: ChatState, event: { toolName: string; toolUseId: s
       toolUseId: event.toolUseId,
       toolName: event.toolName,
       input: event.input,
-      collapsed: false,
+      collapsed: true,
     }];
   });
 }
 
-function handleToolResult(state: ChatState, toolUseId: string, summary: string): ChatState {
+function handleToolResult(state: ChatState, toolUseId: string, summary: string, isSubagent: boolean): ChatState {
+  if (isSubagent) {
+    return routeToolResultToSubagent(state, toolUseId, summary);
+  }
+
   return updateActiveMessage(state, (blocks) => {
     // Collapse the matching toolUse block
     const updated = blocks.map(b =>
@@ -223,6 +237,7 @@ function handleSubagentStarted(state: ChatState, event: { taskId: string; descri
     (blocks) => [...blocks, {
       type: 'subagent' as const,
       taskId: event.taskId,
+      toolUseId: event.toolUseId,
       description: event.description,
       status: 'running',
       messages: [],
@@ -263,11 +278,50 @@ function handleSubagentCompleted(state: ChatState, event: { taskId: string; stat
   );
 }
 
-function handleSubagentTextDelta(state: ChatState, text: string): ChatState {
-  // Route to the most recently started running subagent
-  const runningSubagents = Array.from(state.activeSubagents.values()).filter(s => s.status === 'running');
-  if (runningSubagents.length === 0) return state;
-  const activeSubagent = runningSubagents[runningSubagents.length - 1];
+function getActiveSubagent(state: ChatState): SubagentState | null {
+  const running = Array.from(state.activeSubagents.values()).filter(s => s.status === 'running');
+  return running.length > 0 ? running[running.length - 1] : null;
+}
+
+function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeStreaming = false): ChatState {
+  const activeSubagent = getActiveSubagent(state);
+  if (!activeSubagent) return state;
+
+  return updateActiveMessage(state, (blocks) =>
+    blocks.map(b => {
+      if (b.type !== 'subagent' || b.taskId !== activeSubagent.taskId) return b;
+
+      const subMessages = [...b.messages];
+      const lastMsg = subMessages[subMessages.length - 1];
+
+      if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
+        let updatedBlocks = lastMsg.blocks;
+        if (finalizeStreaming) {
+          updatedBlocks = updatedBlocks.map(bl =>
+            (bl.type === 'text' || bl.type === 'thinking') && bl.isStreaming
+              ? { ...bl, isStreaming: false }
+              : bl
+          );
+        }
+        subMessages[subMessages.length - 1] = { ...lastMsg, blocks: [...updatedBlocks, block] };
+      } else {
+        subMessages.push({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          blocks: [block],
+          timestamp: new Date().toISOString(),
+          isStreaming: true,
+        });
+      }
+
+      return { ...b, messages: subMessages };
+    }),
+  );
+}
+
+function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'thinking', text: string): ChatState {
+  const activeSubagent = getActiveSubagent(state);
+  if (!activeSubagent) return state;
 
   return updateActiveMessage(state, (blocks) =>
     blocks.map(b => {
@@ -278,18 +332,23 @@ function handleSubagentTextDelta(state: ChatState, text: string): ChatState {
 
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
         const lastBlock = lastMsg.blocks[lastMsg.blocks.length - 1];
-        if (lastBlock && lastBlock.type === 'text' && lastBlock.isStreaming) {
+        if (lastBlock && lastBlock.type === blockType && lastBlock.isStreaming) {
           const updatedBlocks = [...lastMsg.blocks.slice(0, -1), { ...lastBlock, text: lastBlock.text + text }];
           subMessages[subMessages.length - 1] = { ...lastMsg, blocks: updatedBlocks };
         } else {
-          const updatedBlocks = [...lastMsg.blocks, { type: 'text' as const, text, isStreaming: true }];
-          subMessages[subMessages.length - 1] = { ...lastMsg, blocks: updatedBlocks };
+          const newBlock = blockType === 'thinking'
+            ? { type: 'thinking' as const, text, isStreaming: true, collapsed: false }
+            : { type: 'text' as const, text, isStreaming: true };
+          subMessages[subMessages.length - 1] = { ...lastMsg, blocks: [...lastMsg.blocks, newBlock] };
         }
       } else {
+        const newBlock = blockType === 'thinking'
+          ? { type: 'thinking' as const, text, isStreaming: true, collapsed: false }
+          : { type: 'text' as const, text, isStreaming: true };
         subMessages.push({
           id: crypto.randomUUID(),
           role: 'assistant',
-          blocks: [{ type: 'text' as const, text, isStreaming: true }],
+          blocks: [newBlock],
           timestamp: new Date().toISOString(),
           isStreaming: true,
         });
@@ -298,6 +357,56 @@ function handleSubagentTextDelta(state: ChatState, text: string): ChatState {
       return { ...b, messages: subMessages };
     }),
   );
+}
+
+function routeToolResultToSubagent(state: ChatState, toolUseId: string, summary: string): ChatState {
+  const activeSubagent = getActiveSubagent(state);
+  if (!activeSubagent) return state;
+
+  return updateActiveMessage(state, (blocks) =>
+    blocks.map(b => {
+      if (b.type !== 'subagent' || b.taskId !== activeSubagent.taskId) return b;
+
+      const subMessages = b.messages.map(msg => {
+        if (msg.role !== 'assistant') return msg;
+        return {
+          ...msg,
+          blocks: msg.blocks.map(bl =>
+            bl.type === 'toolUse' && bl.toolUseId === toolUseId
+              ? { ...bl, collapsed: true }
+              : bl
+          ),
+        };
+      });
+
+      const lastMsg = subMessages[subMessages.length - 1];
+      const resultBlock: UIContentBlock = {
+        type: 'toolResult' as const,
+        toolUseId,
+        content: summary,
+        isError: false,
+        collapsed: true,
+      };
+
+      if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
+        subMessages[subMessages.length - 1] = { ...lastMsg, blocks: [...lastMsg.blocks, resultBlock] };
+      } else {
+        subMessages.push({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          blocks: [resultBlock],
+          timestamp: new Date().toISOString(),
+          isStreaming: true,
+        });
+      }
+
+      return { ...b, messages: subMessages };
+    }),
+  );
+}
+
+function handleSubagentTextDelta(state: ChatState, text: string): ChatState {
+  return routeStreamingBlockToSubagent(state, 'text', text);
 }
 
 function handleResult(state: ChatState, event: { output: string; usage: { inputTokens: number; outputTokens: number }; sessionId?: string }): ChatState {

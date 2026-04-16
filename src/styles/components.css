@@ -545,10 +545,23 @@
 [data-ac="tool-use-name"] {
   font-weight: 500;
   font-family: var(--ac-font-mono);
+  flex-shrink: 0;
+}
+
+[data-ac="tool-use-description"] {
   flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--ac-text-secondary);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
 }
 
 [data-ac="toggle-arrow"] {
+  margin-left: auto;
   font-size: 0.75rem;
   color: var(--ac-text-muted);
 }

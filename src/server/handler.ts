@@ -324,6 +324,29 @@ function buildDefaultArchitectures(): Record<string, ArchitectureConfig> {
 
 // --- Helpers for collecting blocks during streaming ---
 
+function findActiveSubagentBlock(blocks: StoredContentBlock[]): (StoredContentBlock & { type: 'subagent' }) | undefined {
+  // Find the most recently added running subagent block
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.type === 'subagent' && b.status === 'running') return b as StoredContentBlock & { type: 'subagent' };
+  }
+  return undefined;
+}
+
+function appendToSubagentMessages(sub: StoredContentBlock & { type: 'subagent' }, block: StoredContentBlock): void {
+  const lastMsg = sub.messages[sub.messages.length - 1];
+  if (lastMsg && lastMsg.role === 'assistant') {
+    lastMsg.blocks.push(block);
+  } else {
+    sub.messages.push({
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      blocks: [block],
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
 function collectBlock(
   event: UnifiedEvent,
   blocks: StoredContentBlock[],
@@ -332,7 +355,18 @@ function collectBlock(
   switch (event.type) {
     case 'text_delta': {
       const e = event as { text: string; isSubagent: boolean };
-      if (e.isSubagent) return; // subagent text handled via assistant_message
+      if (e.isSubagent) {
+        const sub = findActiveSubagentBlock(blocks);
+        if (!sub) return;
+        const lastMsg = sub.messages[sub.messages.length - 1];
+        const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
+        if (lastBlock && lastBlock.type === 'text') {
+          lastBlock.text += e.text;
+        } else {
+          appendToSubagentMessages(sub, { type: 'text', text: e.text });
+        }
+        return;
+      }
       const last = blocks[blocks.length - 1];
       if (last && last.type === 'text') {
         last.text += e.text;
@@ -343,7 +377,18 @@ function collectBlock(
     }
     case 'thinking': {
       const e = event as { text: string; isSubagent: boolean };
-      if (e.isSubagent) return;
+      if (e.isSubagent) {
+        const sub = findActiveSubagentBlock(blocks);
+        if (!sub) return;
+        const lastMsg = sub.messages[sub.messages.length - 1];
+        const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
+        if (lastBlock && lastBlock.type === 'thinking') {
+          lastBlock.text += e.text;
+        } else {
+          appendToSubagentMessages(sub, { type: 'thinking', text: e.text });
+        }
+        return;
+      }
       const last = blocks[blocks.length - 1];
       if (last && last.type === 'thinking') {
         last.text += e.text;
@@ -354,18 +399,27 @@ function collectBlock(
     }
     case 'tool_use': {
       const e = event as { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean };
-      if (e.isSubagent) return;
+      if (e.isSubagent) {
+        const sub = findActiveSubagentBlock(blocks);
+        if (sub) appendToSubagentMessages(sub, { type: 'toolUse', toolUseId: e.toolUseId, toolName: e.toolName, input: e.input });
+        return;
+      }
       blocks.push({ type: 'toolUse', toolUseId: e.toolUseId, toolName: e.toolName, input: e.input });
       break;
     }
     case 'tool_result': {
-      const e = event as { toolUseId: string; summary: string };
+      const e = event as unknown as { toolUseId: string; summary: string; isSubagent: boolean };
+      if (e.isSubagent) {
+        const sub = findActiveSubagentBlock(blocks);
+        if (sub) appendToSubagentMessages(sub, { type: 'toolResult', toolUseId: e.toolUseId, content: e.summary });
+        return;
+      }
       blocks.push({ type: 'toolResult', toolUseId: e.toolUseId, content: e.summary });
       break;
     }
     case 'subagent_started': {
-      const e = event as { taskId: string; description: string };
-      blocks.push({ type: 'subagent', taskId: e.taskId, description: e.description, status: 'running', messages: [] });
+      const e = event as { taskId: string; description: string; toolUseId: string };
+      blocks.push({ type: 'subagent', taskId: e.taskId, toolUseId: e.toolUseId ?? '', description: e.description, status: 'running', messages: [] });
       break;
     }
     case 'subagent_completed': {

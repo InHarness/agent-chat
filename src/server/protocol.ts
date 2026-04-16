@@ -25,7 +25,7 @@ export type WireEvent =
   | { type: 'text_delta'; text: string; isSubagent: boolean }
   | { type: 'thinking'; text: string; isSubagent: boolean }
   | { type: 'tool_use'; toolName: string; toolUseId: string; input: unknown; isSubagent: boolean }
-  | { type: 'tool_result'; toolUseId: string; summary: string }
+  | { type: 'tool_result'; toolUseId: string; summary: string; isSubagent: boolean }
   | { type: 'assistant_message'; message: WireNormalizedMessage }
   | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }
   | { type: 'subagent_progress'; taskId: string; description: string; lastToolName?: string }
@@ -88,7 +88,7 @@ export type StoredContentBlock =
   | { type: 'toolUse'; toolUseId: string; toolName: string; input: unknown }
   | { type: 'toolResult'; toolUseId: string; content: string; isError?: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
-  | { type: 'subagent'; taskId: string; description: string; status: string; summary?: string; messages: StoredMessage[] };
+  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: StoredMessage[] };
 
 export interface StoredThread {
   id: string;

@@ -18,7 +18,7 @@ export type UIContentBlock =
   | { type: 'toolUse'; toolUseId: string; toolName: string; input: unknown; collapsed: boolean }
   | { type: 'toolResult'; toolUseId: string; content: string; isError: boolean; collapsed: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
-  | { type: 'subagent'; taskId: string; description: string; status: string; summary?: string; messages: ChatMessage[] };
+  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[] };
 
 // --- Chat Message ---
 
@@ -93,6 +93,7 @@ export function storedBlockToUI(block: StoredContentBlock): UIContentBlock {
       return {
         type: 'subagent',
         taskId: block.taskId,
+        toolUseId: block.toolUseId,
         description: block.description,
         status: block.status,
         summary: block.summary,
