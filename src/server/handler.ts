@@ -1,7 +1,7 @@
 import { resolve } from 'path';
 import type { Request, Response } from 'express';
 import type { RuntimeAdapter, UnifiedEvent } from '@inharness/agent-adapters';
-import { createAdapter, listArchitectures, getModelsForArchitecture } from '@inharness/agent-adapters';
+import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions } from '@inharness/agent-adapters';
 import type {
   ArchitectureConfig,
   ServerConfig,
@@ -72,6 +72,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         cwd: chatReq.cwd ? resolve(chatReq.cwd) : undefined,
         systemPrompt: chatReq.systemPrompt,
         maxTurns: chatReq.maxTurns,
+        architectureConfig: chatReq.architectureConfig,
       });
     }
 
@@ -122,14 +123,17 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const effectiveCwd = existingThread?.cwd ?? (chatReq.cwd ? resolve(chatReq.cwd) : undefined) ?? config.cwd ?? process.cwd();
     const effectiveSystemPrompt = chatReq.systemPrompt ?? existingThread?.systemPrompt ?? config.systemPrompt;
     const effectiveMaxTurns = chatReq.maxTurns ?? existingThread?.maxTurns;
+    const effectiveArchitectureConfig: Record<string, unknown> | undefined =
+      chatReq.architectureConfig ?? existingThread?.architectureConfig;
 
-    // Persist editable fields (systemPrompt, maxTurns) for existing threads
+    // Persist editable fields (systemPrompt, maxTurns, architectureConfig) for existing threads
     if (existingThread) {
       const updates: Record<string, unknown> = {};
       if (chatReq.systemPrompt !== undefined) updates.systemPrompt = chatReq.systemPrompt;
       if (chatReq.maxTurns !== undefined) updates.maxTurns = chatReq.maxTurns;
+      if (chatReq.architectureConfig !== undefined) updates.architectureConfig = chatReq.architectureConfig;
       if (Object.keys(updates).length > 0) {
-        threads.update(threadId, updates as { systemPrompt?: string; maxTurns?: number });
+        threads.update(threadId, updates as { systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown> });
       }
     }
 
@@ -143,7 +147,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         maxTurns: effectiveMaxTurns,
         allowedTools: chatReq.allowedTools,
         cwd: effectiveCwd,
-        architectureConfig: chatReq.architectureConfig,
+        architectureConfig: effectiveArchitectureConfig,
       });
 
       for await (const event of stream) {
@@ -221,13 +225,14 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   };
 
   const handleCreateThread = (req: Request, res: Response): void => {
-    const { title, architecture, model, cwd, systemPrompt, maxTurns } = req.body as {
+    const { title, architecture, model, cwd, systemPrompt, maxTurns, architectureConfig } = req.body as {
       title?: string;
       architecture?: string;
       model?: string;
       cwd?: string;
       systemPrompt?: string;
       maxTurns?: number;
+      architectureConfig?: Record<string, unknown>;
     };
 
     const arch = architecture ?? defaultArchitecture;
@@ -243,6 +248,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       cwd: cwd ? resolve(cwd) : undefined,
       systemPrompt,
       maxTurns,
+      architectureConfig,
     });
 
     res.status(201).json({
@@ -316,6 +322,7 @@ function buildDefaultArchitectures(): Record<string, ArchitectureConfig> {
       result[arch] = {
         models: models.map(m => m.alias),
         default: models[0].alias,
+        options: getArchitectureOptions(arch),
       };
     }
   }

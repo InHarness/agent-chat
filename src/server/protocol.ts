@@ -1,6 +1,8 @@
 // Wire format types — shared between client and server
 // These mirror UnifiedEvent from @inharness/agent-adapters but are JSON-safe
 
+import type { ArchOption } from '@inharness/agent-adapters';
+
 export interface WireContentBlock {
   type: 'text' | 'thinking' | 'toolUse' | 'toolResult' | 'image';
   text?: string;
@@ -55,6 +57,7 @@ export interface ChatRequest {
 export interface ArchitectureConfig {
   models: string[];
   default: string;
+  options: ArchOption[];
 }
 
 export interface ServerConfig {
@@ -99,6 +102,7 @@ export interface StoredThread {
   cwd?: string;
   systemPrompt?: string;
   maxTurns?: number;
+  architectureConfig?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];

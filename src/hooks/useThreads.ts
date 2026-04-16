@@ -5,7 +5,16 @@ import { storedMessageToChat } from '../types.js';
 
 interface UseThreadsOptions {
   serverUrl: string;
-  onThreadLoaded: (messages: ChatMessage[], sessionId?: string, architecture?: string, model?: string, cwd?: string, systemPrompt?: string, maxTurns?: number) => void;
+  onThreadLoaded: (
+    messages: ChatMessage[],
+    sessionId?: string,
+    architecture?: string,
+    model?: string,
+    cwd?: string,
+    systemPrompt?: string,
+    maxTurns?: number,
+    architectureConfig?: Record<string, unknown>,
+  ) => void;
 }
 
 export function useThreads({ serverUrl, onThreadLoaded }: UseThreadsOptions) {
@@ -33,7 +42,16 @@ export function useThreads({ serverUrl, onThreadLoaded }: UseThreadsOptions) {
 
       setActiveThreadId(threadId);
       const messages = thread.messages.map(storedMessageToChat);
-      onThreadLoaded(messages, thread.sessionId, thread.architecture, thread.model, thread.cwd, thread.systemPrompt, thread.maxTurns);
+      onThreadLoaded(
+        messages,
+        thread.sessionId,
+        thread.architecture,
+        thread.model,
+        thread.cwd,
+        thread.systemPrompt,
+        thread.maxTurns,
+        thread.architectureConfig,
+      );
     } catch {
       // Thread load failed
     } finally {
@@ -41,7 +59,7 @@ export function useThreads({ serverUrl, onThreadLoaded }: UseThreadsOptions) {
     }
   }, [serverUrl, onThreadLoaded]);
 
-  const createThread = useCallback(async (architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number }): Promise<string | null> => {
+  const createThread = useCallback(async (architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown> }): Promise<string | null> => {
     try {
       const res = await fetch(`${serverUrl}/api/threads`, {
         method: 'POST',

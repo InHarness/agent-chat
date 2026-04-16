@@ -55,6 +55,9 @@ export function AgentChat({
               onSystemPromptChange={chat.setSystemPrompt}
               maxTurns={chat.maxTurns}
               onMaxTurnsChange={chat.setMaxTurns}
+              options={chat.architectureOptions}
+              architectureConfig={chat.architectureConfig}
+              onArchitectureConfigChange={chat.setArchitectureConfig}
               disabled={chat.isStreaming}
             />
           </>

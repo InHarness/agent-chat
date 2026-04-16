@@ -9,6 +9,7 @@ import type {
 
 // Re-export wire types for consumers
 export type { WireEvent, ServerConfig, ThreadMeta };
+export type { ArchOption, ArchOptionType } from '@inharness/agent-adapters';
 
 // --- UI Content Blocks ---
 

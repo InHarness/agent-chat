@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ArchOption } from '@inharness/agent-adapters';
 import type { AgentChatConfig, ChatMessage } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
 import { useMessageReducer } from './useMessageReducer.js';
 import { useEventStream } from './useEventStream.js';
 import { useAgentConfig } from './useAgentConfig.js';
 import { useThreads } from './useThreads.js';
+
+function buildArchDefaults(options: ArchOption[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const opt of options) {
+    if (opt.default !== undefined) result[opt.key] = opt.default;
+  }
+  return result;
+}
 
 export function useAgentChat(chatConfig: AgentChatConfig) {
   const { serverUrl } = chatConfig;
@@ -28,26 +37,46 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [maxTurns, setMaxTurns] = useState<number | undefined>(undefined);
+  const [architectureConfig, setArchitectureConfig] = useState<Record<string, unknown>>({});
 
   // Track the latest threadId from the server (set on 'connected' event)
   const activeThreadIdRef = useRef<string | null>(null);
 
   // Threads
-  const threadCallbackRef = useRef<(messages: ChatMessage[], sessionId?: string, arch?: string, model?: string, cwd?: string, systemPrompt?: string, maxTurns?: number) => void>(null);
-  threadCallbackRef.current = (messages, sessionId, arch, model, threadCwd, threadSystemPrompt, threadMaxTurns) => {
+  const threadCallbackRef = useRef<(
+    messages: ChatMessage[],
+    sessionId?: string,
+    arch?: string,
+    model?: string,
+    cwd?: string,
+    systemPrompt?: string,
+    maxTurns?: number,
+    architectureConfig?: Record<string, unknown>,
+  ) => void>(null);
+  threadCallbackRef.current = (messages, sessionId, arch, model, threadCwd, threadSystemPrompt, threadMaxTurns, threadArchConfig) => {
     restoreMessages(messages, sessionId, arch, model);
     if (arch) agentConfig.setArchitecture(arch);
     if (model) agentConfig.setModel(model);
     setActiveCwd(threadCwd ?? null);
     setSystemPrompt(threadSystemPrompt ?? '');
     setMaxTurns(threadMaxTurns);
+    setArchitectureConfig(threadArchConfig ?? {});
   };
 
   const threadHook = useThreads({
     serverUrl,
     onThreadLoaded: useCallback(
-      (messages: ChatMessage[], sessionId?: string, arch?: string, model?: string, cwd?: string, systemPrompt?: string, maxTurns?: number) => {
-        threadCallbackRef.current?.(messages, sessionId, arch, model, cwd, systemPrompt, maxTurns);
+      (
+        messages: ChatMessage[],
+        sessionId?: string,
+        arch?: string,
+        model?: string,
+        cwd?: string,
+        systemPrompt?: string,
+        maxTurns?: number,
+        architectureConfig?: Record<string, unknown>,
+      ) => {
+        threadCallbackRef.current?.(messages, sessionId, arch, model, cwd, systemPrompt, maxTurns, architectureConfig);
       },
       [],
     ),
@@ -100,30 +129,34 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
       cwd: threadHook.activeThreadId ? undefined : cwd || undefined,
       systemPrompt: systemPrompt || undefined,
       maxTurns,
+      architectureConfig: Object.keys(architectureConfig).length > 0 ? architectureConfig : undefined,
     });
 
     // Refresh thread list after response
     threadHook.refreshThreads();
-  }, [sendUserMessage, startStream, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns]);
+  }, [sendUserMessage, startStream, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig]);
 
   const abort = useCallback(() => {
     abortStream();
     handleWireEvent({ type: 'error', error: 'Request aborted', code: 'ABORTED' });
   }, [abortStream, handleWireEvent]);
 
-  const resetAdvancedOptions = useCallback(() => {
+  const resetAdvancedOptions = useCallback((archOverride?: string) => {
     setCwd('');
     setActiveCwd(null);
     setSystemPrompt('');
     setMaxTurns(undefined);
-  }, []);
+    const arch = archOverride ?? agentConfig.architecture;
+    const options = agentConfig.config?.architectures[arch]?.options ?? [];
+    setArchitectureConfig(buildArchDefaults(options));
+  }, [agentConfig.config, agentConfig.architecture]);
 
   const setArchitecture = useCallback((arch: string) => {
     agentConfig.setArchitecture(arch);
     setReducerArchitecture(arch);
     activeThreadIdRef.current = null;
     threadHook.setActiveThreadId(null);
-    resetAdvancedOptions();
+    resetAdvancedOptions(arch);
   }, [agentConfig, setReducerArchitecture, threadHook, resetAdvancedOptions]);
 
   const setModel = useCallback((mdl: string) => {
@@ -134,6 +167,17 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     resetAdvancedOptions();
   }, [agentConfig, setReducerModel, threadHook, resetAdvancedOptions]);
 
+  // Seed architecture-specific defaults on initial config load (when no thread active).
+  const seededInitialRef = useRef(false);
+  useEffect(() => {
+    if (seededInitialRef.current) return;
+    if (!agentConfig.config || !agentConfig.architecture) return;
+    if (threadHook.activeThreadId) return;
+    seededInitialRef.current = true;
+    const options = agentConfig.config.architectures[agentConfig.architecture]?.options ?? [];
+    setArchitectureConfig(buildArchDefaults(options));
+  }, [agentConfig.config, agentConfig.architecture, threadHook.activeThreadId]);
+
   const createThread = useCallback(async () => {
     clear();
     resetAdvancedOptions();
@@ -141,9 +185,10 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
       cwd: cwd || undefined,
       systemPrompt: systemPrompt || undefined,
       maxTurns,
+      architectureConfig: Object.keys(architectureConfig).length > 0 ? architectureConfig : undefined,
     });
     if (id) activeThreadIdRef.current = id;
-  }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns]);
+  }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig]);
 
   return {
     // Conversation state
@@ -170,6 +215,9 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     setSystemPrompt,
     maxTurns,
     setMaxTurns,
+    architectureConfig,
+    setArchitectureConfig,
+    architectureOptions: agentConfig.config?.architectures[agentConfig.architecture]?.options ?? [],
 
     // Threads
     threads: threadHook.threads,
