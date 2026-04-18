@@ -104,7 +104,7 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
       return handleTextDelta(state, event.text, event.isSubagent);
 
     case 'thinking':
-      return handleThinking(state, event.text, event.isSubagent);
+      return handleThinking(state, event.text, event.isSubagent, event.replace);
 
     case 'tool_use':
       return handleToolUse(state, event);
@@ -159,17 +159,20 @@ function handleTextDelta(state: ChatState, text: string, isSubagent: boolean): C
   });
 }
 
-function handleThinking(state: ChatState, text: string, isSubagent: boolean): ChatState {
+function handleThinking(state: ChatState, text: string, isSubagent: boolean, replace?: boolean): ChatState {
   if (isSubagent) {
-    return routeStreamingBlockToSubagent(state, 'thinking', text);
+    return routeStreamingBlockToSubagent(state, 'thinking', text, replace);
   }
 
   return updateActiveMessage(state, (blocks) => {
     const last = blocks[blocks.length - 1];
-    if (last && last.type === 'thinking' && last.isStreaming) {
+    if (!replace && last && last.type === 'thinking' && last.isStreaming) {
       return [...blocks.slice(0, -1), { ...last, text: last.text + text }];
     }
-    return [...blocks, { type: 'thinking' as const, text, isStreaming: true, collapsed: false }];
+    const finalized = replace && last && last.type === 'thinking' && last.isStreaming
+      ? [...blocks.slice(0, -1), { ...last, isStreaming: false }]
+      : blocks;
+    return [...finalized, { type: 'thinking' as const, text, isStreaming: true, collapsed: false }];
   });
 }
 
@@ -319,7 +322,7 @@ function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeS
   );
 }
 
-function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'thinking', text: string): ChatState {
+function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'thinking', text: string, replace?: boolean): ChatState {
   const activeSubagent = getActiveSubagent(state);
   if (!activeSubagent) return state;
 
@@ -332,14 +335,17 @@ function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'th
 
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
         const lastBlock = lastMsg.blocks[lastMsg.blocks.length - 1];
-        if (lastBlock && lastBlock.type === blockType && lastBlock.isStreaming) {
+        if (!replace && lastBlock && lastBlock.type === blockType && lastBlock.isStreaming) {
           const updatedBlocks = [...lastMsg.blocks.slice(0, -1), { ...lastBlock, text: lastBlock.text + text }];
           subMessages[subMessages.length - 1] = { ...lastMsg, blocks: updatedBlocks };
         } else {
+          const priorBlocks = replace && lastBlock && lastBlock.type === blockType && lastBlock.isStreaming
+            ? [...lastMsg.blocks.slice(0, -1), { ...lastBlock, isStreaming: false }]
+            : lastMsg.blocks;
           const newBlock = blockType === 'thinking'
             ? { type: 'thinking' as const, text, isStreaming: true, collapsed: false }
             : { type: 'text' as const, text, isStreaming: true };
-          subMessages[subMessages.length - 1] = { ...lastMsg, blocks: [...lastMsg.blocks, newBlock] };
+          subMessages[subMessages.length - 1] = { ...lastMsg, blocks: [...priorBlocks, newBlock] };
         }
       } else {
         const newBlock = blockType === 'thinking'

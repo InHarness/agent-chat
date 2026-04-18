@@ -1,3 +1,6 @@
 node_modules/
 dist/
 examples/basic/threads/
+examples/basic/.env
+.env
+.env.local

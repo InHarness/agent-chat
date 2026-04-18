@@ -383,13 +383,13 @@ function collectBlock(
       break;
     }
     case 'thinking': {
-      const e = event as { text: string; isSubagent: boolean };
+      const e = event as { text: string; isSubagent: boolean; replace?: boolean };
       if (e.isSubagent) {
         const sub = findActiveSubagentBlock(blocks);
         if (!sub) return;
         const lastMsg = sub.messages[sub.messages.length - 1];
         const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
-        if (lastBlock && lastBlock.type === 'thinking') {
+        if (!e.replace && lastBlock && lastBlock.type === 'thinking') {
           lastBlock.text += e.text;
         } else {
           appendToSubagentMessages(sub, { type: 'thinking', text: e.text });
@@ -397,7 +397,7 @@ function collectBlock(
         return;
       }
       const last = blocks[blocks.length - 1];
-      if (last && last.type === 'thinking') {
+      if (!e.replace && last && last.type === 'thinking') {
         last.text += e.text;
       } else {
         blocks.push({ type: 'thinking', text: e.text });
