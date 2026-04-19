@@ -50,6 +50,7 @@ export interface ChatRequest {
   allowedTools?: string[];
   architectureConfig?: Record<string, unknown>;
   cwd?: string;
+  planMode?: boolean;
 }
 
 // --- Config ---
@@ -103,6 +104,7 @@ export interface StoredThread {
   systemPrompt?: string;
   maxTurns?: number;
   architectureConfig?: Record<string, unknown>;
+  planMode?: boolean;
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];

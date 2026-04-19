@@ -5,9 +5,11 @@ interface InputAreaProps {
   onAbort: () => void;
   isStreaming: boolean;
   disabled?: boolean;
+  planMode?: boolean;
+  onPlanModeChange?: (v: boolean) => void;
 }
 
-export function InputArea({ onSend, onAbort, isStreaming, disabled }: InputAreaProps) {
+export function InputArea({ onSend, onAbort, isStreaming, disabled, planMode, onPlanModeChange }: InputAreaProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -38,29 +40,42 @@ export function InputArea({ onSend, onAbort, isStreaming, disabled }: InputAreaP
 
   return (
     <div data-ac="input-area">
-      <textarea
-        ref={textareaRef}
-        data-ac="input-textarea"
-        value={text}
-        onChange={handleInput}
-        onKeyDown={handleKeyDown}
-        placeholder="Type a message..."
-        rows={1}
-        disabled={disabled || isStreaming}
-      />
-      {isStreaming ? (
-        <button data-ac="abort-button" onClick={onAbort} type="button">
-          Stop
-        </button>
-      ) : (
-        <button
-          data-ac="send-button"
-          onClick={handleSend}
-          disabled={!text.trim() || disabled}
-          type="button"
-        >
-          Send
-        </button>
+      <div data-ac="input-row">
+        <textarea
+          ref={textareaRef}
+          data-ac="input-textarea"
+          value={text}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          placeholder="Type a message..."
+          rows={1}
+          disabled={disabled || isStreaming}
+        />
+        {isStreaming ? (
+          <button data-ac="abort-button" onClick={onAbort} type="button">
+            Stop
+          </button>
+        ) : (
+          <button
+            data-ac="send-button"
+            onClick={handleSend}
+            disabled={!text.trim() || disabled}
+            type="button"
+          >
+            Send
+          </button>
+        )}
+      </div>
+      {onPlanModeChange && (
+        <label data-ac="plan-mode-check" data-ac-active={planMode ? 'true' : 'false'}>
+          <input
+            type="checkbox"
+            checked={!!planMode}
+            onChange={e => onPlanModeChange(e.target.checked)}
+            disabled={disabled || isStreaming}
+          />
+          <span>Plan mode (read-only)</span>
+        </label>
       )}
     </div>
   );

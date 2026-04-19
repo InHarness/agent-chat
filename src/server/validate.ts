@@ -54,6 +54,11 @@ export function validateChatRequest(body: unknown, validArchitectures: string[])
     errors.push({ field: 'maxTurns', message: 'maxTurns must be a positive number' });
   }
 
+  // planMode — optional boolean
+  if (b.planMode !== undefined && typeof b.planMode !== 'boolean') {
+    errors.push({ field: 'planMode', message: 'planMode must be a boolean' });
+  }
+
   if (errors.length > 0) return { ok: false, errors };
 
   return {
@@ -69,6 +74,7 @@ export function validateChatRequest(body: unknown, validArchitectures: string[])
       allowedTools: b.allowedTools as string[] | undefined,
       architectureConfig: b.architectureConfig as Record<string, unknown> | undefined,
       cwd: b.cwd as string | undefined,
+      planMode: b.planMode as boolean | undefined,
     },
   };
 }

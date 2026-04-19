@@ -73,6 +73,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         systemPrompt: chatReq.systemPrompt,
         maxTurns: chatReq.maxTurns,
         architectureConfig: chatReq.architectureConfig,
+        planMode: chatReq.planMode,
       });
     }
 
@@ -125,15 +126,17 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const effectiveMaxTurns = chatReq.maxTurns ?? existingThread?.maxTurns;
     const effectiveArchitectureConfig: Record<string, unknown> | undefined =
       chatReq.architectureConfig ?? existingThread?.architectureConfig;
+    const effectivePlanMode = chatReq.planMode ?? existingThread?.planMode;
 
-    // Persist editable fields (systemPrompt, maxTurns, architectureConfig) for existing threads
+    // Persist editable fields (systemPrompt, maxTurns, architectureConfig, planMode) for existing threads
     if (existingThread) {
       const updates: Record<string, unknown> = {};
       if (chatReq.systemPrompt !== undefined) updates.systemPrompt = chatReq.systemPrompt;
       if (chatReq.maxTurns !== undefined) updates.maxTurns = chatReq.maxTurns;
       if (chatReq.architectureConfig !== undefined) updates.architectureConfig = chatReq.architectureConfig;
+      if (chatReq.planMode !== undefined) updates.planMode = chatReq.planMode;
       if (Object.keys(updates).length > 0) {
-        threads.update(threadId, updates as { systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown> });
+        threads.update(threadId, updates as { systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown>; planMode?: boolean });
       }
     }
 
@@ -148,6 +151,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         allowedTools: chatReq.allowedTools,
         cwd: effectiveCwd,
         architectureConfig: effectiveArchitectureConfig,
+        planMode: effectivePlanMode,
       });
 
       for await (const event of stream) {
@@ -225,7 +229,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   };
 
   const handleCreateThread = (req: Request, res: Response): void => {
-    const { title, architecture, model, cwd, systemPrompt, maxTurns, architectureConfig } = req.body as {
+    const { title, architecture, model, cwd, systemPrompt, maxTurns, architectureConfig, planMode } = req.body as {
       title?: string;
       architecture?: string;
       model?: string;
@@ -233,6 +237,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       systemPrompt?: string;
       maxTurns?: number;
       architectureConfig?: Record<string, unknown>;
+      planMode?: boolean;
     };
 
     const arch = architecture ?? defaultArchitecture;
@@ -249,6 +254,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       systemPrompt,
       maxTurns,
       architectureConfig,
+      planMode,
     });
 
     res.status(201).json({

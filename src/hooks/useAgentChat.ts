@@ -38,6 +38,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [maxTurns, setMaxTurns] = useState<number | undefined>(undefined);
   const [architectureConfig, setArchitectureConfig] = useState<Record<string, unknown>>({});
+  const [planMode, setPlanMode] = useState(false);
 
   // Track the latest threadId from the server (set on 'connected' event)
   const activeThreadIdRef = useRef<string | null>(null);
@@ -52,8 +53,9 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     systemPrompt?: string,
     maxTurns?: number,
     architectureConfig?: Record<string, unknown>,
+    planMode?: boolean,
   ) => void>(null);
-  threadCallbackRef.current = (messages, sessionId, arch, model, threadCwd, threadSystemPrompt, threadMaxTurns, threadArchConfig) => {
+  threadCallbackRef.current = (messages, sessionId, arch, model, threadCwd, threadSystemPrompt, threadMaxTurns, threadArchConfig, threadPlanMode) => {
     restoreMessages(messages, sessionId, arch, model);
     if (arch) agentConfig.setArchitecture(arch);
     if (model) agentConfig.setModel(model);
@@ -61,6 +63,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     setSystemPrompt(threadSystemPrompt ?? '');
     setMaxTurns(threadMaxTurns);
     setArchitectureConfig(threadArchConfig ?? {});
+    setPlanMode(threadPlanMode ?? false);
   };
 
   const threadHook = useThreads({
@@ -75,8 +78,9 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
         systemPrompt?: string,
         maxTurns?: number,
         architectureConfig?: Record<string, unknown>,
+        planMode?: boolean,
       ) => {
-        threadCallbackRef.current?.(messages, sessionId, arch, model, cwd, systemPrompt, maxTurns, architectureConfig);
+        threadCallbackRef.current?.(messages, sessionId, arch, model, cwd, systemPrompt, maxTurns, architectureConfig, planMode);
       },
       [],
     ),
@@ -130,11 +134,12 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
       systemPrompt: systemPrompt || undefined,
       maxTurns,
       architectureConfig: Object.keys(architectureConfig).length > 0 ? architectureConfig : undefined,
+      planMode: planMode || undefined,
     });
 
     // Refresh thread list after response
     threadHook.refreshThreads();
-  }, [sendUserMessage, startStream, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig]);
+  }, [sendUserMessage, startStream, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig, planMode]);
 
   const abort = useCallback(() => {
     abortStream();
@@ -146,6 +151,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     setActiveCwd(null);
     setSystemPrompt('');
     setMaxTurns(undefined);
+    setPlanMode(false);
     const arch = archOverride ?? agentConfig.architecture;
     const options = agentConfig.config?.architectures[arch]?.options ?? [];
     setArchitectureConfig(buildArchDefaults(options));
@@ -186,9 +192,10 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
       systemPrompt: systemPrompt || undefined,
       maxTurns,
       architectureConfig: Object.keys(architectureConfig).length > 0 ? architectureConfig : undefined,
+      planMode: planMode || undefined,
     });
     if (id) activeThreadIdRef.current = id;
-  }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig]);
+  }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig, planMode]);
 
   return {
     // Conversation state
@@ -218,6 +225,8 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     architectureConfig,
     setArchitectureConfig,
     architectureOptions: agentConfig.config?.architectures[agentConfig.architecture]?.options ?? [],
+    planMode,
+    setPlanMode,
 
     // Threads
     threads: threadHook.threads,

@@ -14,6 +14,7 @@ interface UseThreadsOptions {
     systemPrompt?: string,
     maxTurns?: number,
     architectureConfig?: Record<string, unknown>,
+    planMode?: boolean,
   ) => void;
 }
 
@@ -51,6 +52,7 @@ export function useThreads({ serverUrl, onThreadLoaded }: UseThreadsOptions) {
         thread.systemPrompt,
         thread.maxTurns,
         thread.architectureConfig,
+        thread.planMode,
       );
     } catch {
       // Thread load failed
@@ -59,7 +61,7 @@ export function useThreads({ serverUrl, onThreadLoaded }: UseThreadsOptions) {
     }
   }, [serverUrl, onThreadLoaded]);
 
-  const createThread = useCallback(async (architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown> }): Promise<string | null> => {
+  const createThread = useCallback(async (architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown>; planMode?: boolean }): Promise<string | null> => {
     try {
       const res = await fetch(`${serverUrl}/api/threads`, {
         method: 'POST',

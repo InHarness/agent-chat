@@ -72,6 +72,8 @@ export function AgentChat({
           onAbort={chat.abort}
           isStreaming={chat.isStreaming}
           disabled={chat.configLoading}
+          planMode={chat.planMode}
+          onPlanModeChange={chat.setPlanMode}
         />
         {showUsage && chat.usage && <UsageDisplay usage={chat.usage} />}
       </div>

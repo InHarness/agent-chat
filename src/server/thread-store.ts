@@ -44,7 +44,7 @@ export class ThreadStore {
     }
   }
 
-  create(id: string, title: string, architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown> }): StoredThread {
+  create(id: string, title: string, architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown>; planMode?: boolean }): StoredThread {
     const now = new Date().toISOString();
     const thread: StoredThread = {
       id,
@@ -55,6 +55,7 @@ export class ThreadStore {
       ...(opts?.systemPrompt && { systemPrompt: opts.systemPrompt }),
       ...(opts?.maxTurns && { maxTurns: opts.maxTurns }),
       ...(opts?.architectureConfig && Object.keys(opts.architectureConfig).length > 0 && { architectureConfig: opts.architectureConfig }),
+      ...(opts?.planMode !== undefined && { planMode: opts.planMode }),
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -63,7 +64,7 @@ export class ThreadStore {
     return thread;
   }
 
-  update(id: string, updates: Partial<Pick<StoredThread, 'title' | 'sessionId' | 'messages' | 'architecture' | 'model' | 'systemPrompt' | 'maxTurns' | 'architectureConfig'>>): StoredThread | null {
+  update(id: string, updates: Partial<Pick<StoredThread, 'title' | 'sessionId' | 'messages' | 'architecture' | 'model' | 'systemPrompt' | 'maxTurns' | 'architectureConfig' | 'planMode'>>): StoredThread | null {
     const thread = this.get(id);
     if (!thread) return null;
 
