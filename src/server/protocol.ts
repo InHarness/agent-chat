@@ -14,12 +14,19 @@ export interface WireContentBlock {
   source?: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string };
 }
 
+export interface WireUsageStats {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
+
 export interface WireNormalizedMessage {
   role: 'user' | 'assistant';
   content: WireContentBlock[];
   timestamp: string;
   subagentTaskId?: string;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: WireUsageStats;
 }
 
 export type WireEvent =
@@ -31,8 +38,8 @@ export type WireEvent =
   | { type: 'assistant_message'; message: WireNormalizedMessage }
   | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }
   | { type: 'subagent_progress'; taskId: string; description: string; lastToolName?: string }
-  | { type: 'subagent_completed'; taskId: string; status: string; summary?: string; usage?: unknown }
-  | { type: 'result'; output: string; usage: { inputTokens: number; outputTokens: number }; sessionId?: string }
+  | { type: 'subagent_completed'; taskId: string; status: string; summary?: string; usage?: WireUsageStats }
+  | { type: 'result'; output: string; usage: WireUsageStats; sessionId?: string }
   | { type: 'error'; error: string; code: string }
   | { type: 'flush' }
   | { type: 'done' };
@@ -59,6 +66,12 @@ export interface ArchitectureConfig {
   models: string[];
   default: string;
   options: ArchOption[];
+  /**
+   * Maximum context window size (in tokens) per model alias.
+   * Populated server-side from MODEL_CONTEXT_WINDOWS; absent for models
+   * where the window depends on runtime configuration (Ollama, custom providers).
+   */
+  contextWindows?: Record<string, number>;
 }
 
 export interface ServerConfig {
@@ -84,6 +97,10 @@ export interface StoredMessage {
   role: 'user' | 'assistant';
   blocks: StoredContentBlock[];
   timestamp: string;
+  /** Task ID when this message belongs to a subagent (mirrors NormalizedMessage.subagentTaskId). */
+  subagentTaskId?: string;
+  /** Usage stats for this message's turn (mirrors NormalizedMessage.usage). */
+  usage?: WireUsageStats;
 }
 
 export type StoredContentBlock =
@@ -92,7 +109,7 @@ export type StoredContentBlock =
   | { type: 'toolUse'; toolUseId: string; toolName: string; input: unknown }
   | { type: 'toolResult'; toolUseId: string; content: string; isError?: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
-  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: StoredMessage[] };
+  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: StoredMessage[]; usage?: WireUsageStats };
 
 export interface StoredThread {
   id: string;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { ArchOption } from '@inharness/agent-adapters';
 
 interface AdvancedOptionsProps {
@@ -13,7 +13,27 @@ interface AdvancedOptionsProps {
   options: ArchOption[];
   architectureConfig: Record<string, unknown>;
   onArchitectureConfigChange: (cfg: Record<string, unknown>) => void;
+  model?: string;
   disabled?: boolean;
+  open: boolean;
+  onClose: () => void;
+}
+
+function resolveOption(
+  opt: ArchOption,
+  config: Record<string, unknown>,
+  model: string | undefined,
+): ArchOption | null {
+  if (opt.visibleWhen) {
+    const cur = config[opt.visibleWhen.key];
+    const target = opt.visibleWhen.equals;
+    const visible = Array.isArray(target) ? target.includes(cur) : cur === target;
+    if (!visible) return null;
+  }
+  if (opt.modelOverrides && model && opt.modelOverrides[model]) {
+    return { ...opt, ...opt.modelOverrides[model] };
+  }
+  return opt;
 }
 
 export function AdvancedOptions({
@@ -28,11 +48,15 @@ export function AdvancedOptions({
   options,
   architectureConfig,
   onArchitectureConfigChange,
+  model,
   disabled,
+  open,
+  onClose,
 }: AdvancedOptionsProps) {
-  const [expanded, setExpanded] = useState(false);
-
   const cwdReadOnly = activeCwd !== null;
+
+  const globalOpts = options.filter(o => o.scope === 'global');
+  const archOpts = options.filter(o => o.scope === 'architecture');
 
   const updateOption = (key: string, value: unknown) => {
     const next = { ...architectureConfig };
@@ -45,17 +69,27 @@ export function AdvancedOptions({
   };
 
   return (
-    <div data-ac="advanced-options">
-      <button
-        data-ac="advanced-toggle"
-        onClick={() => setExpanded(!expanded)}
-        type="button"
-      >
-        <span data-ac="advanced-chevron" data-expanded={expanded}>&#9656;</span>
-        Advanced options
-      </button>
-      {expanded && (
-        <div data-ac="advanced-panel">
+    <aside
+      data-ac="advanced-drawer"
+      data-ac-open={open ? 'true' : 'false'}
+      aria-hidden={!open}
+      aria-label="Advanced options"
+    >
+      <div data-ac="advanced-drawer-header">
+        <span data-ac="advanced-drawer-title">Advanced options</span>
+        <button
+          data-ac="advanced-drawer-close"
+          onClick={onClose}
+          type="button"
+          aria-label="Close advanced options"
+          tabIndex={open ? 0 : -1}
+        >
+          &#10005;
+        </button>
+      </div>
+      <div data-ac="advanced-drawer-body">
+        <section data-ac="advanced-section">
+          <h3 data-ac="advanced-section-title">Built-in</h3>
           <div data-ac="advanced-field">
             <label data-ac="advanced-label" htmlFor="ac-cwd">Working directory</label>
             <input
@@ -68,6 +102,7 @@ export function AdvancedOptions({
               placeholder={defaultCwd}
               disabled={disabled || cwdReadOnly}
               readOnly={cwdReadOnly}
+              tabIndex={open ? 0 : -1}
             />
           </div>
           <div data-ac="advanced-field">
@@ -79,7 +114,8 @@ export function AdvancedOptions({
               onChange={e => onSystemPromptChange(e.target.value)}
               placeholder="Override default system prompt..."
               disabled={disabled}
-              rows={3}
+              rows={4}
+              tabIndex={open ? 0 : -1}
             />
           </div>
           <div data-ac="advanced-field">
@@ -96,20 +132,45 @@ export function AdvancedOptions({
               }}
               placeholder="Unlimited"
               disabled={disabled}
+              tabIndex={open ? 0 : -1}
             />
           </div>
-          {options.map(opt => (
-            <ArchOptionField
-              key={opt.key}
-              option={opt}
-              value={architectureConfig[opt.key]}
-              onChange={v => updateOption(opt.key, v)}
-              disabled={disabled}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+          {globalOpts.map(opt => {
+            const resolved = resolveOption(opt, architectureConfig, model);
+            if (!resolved) return null;
+            return (
+              <ArchOptionField
+                key={resolved.key}
+                option={resolved}
+                value={architectureConfig[resolved.key]}
+                onChange={v => updateOption(resolved.key, v)}
+                disabled={disabled}
+                tabIndex={open ? 0 : -1}
+              />
+            );
+          })}
+        </section>
+        {archOpts.length > 0 && (
+          <section data-ac="advanced-section">
+            <h3 data-ac="advanced-section-title">Architecture</h3>
+            {archOpts.map(opt => {
+              const resolved = resolveOption(opt, architectureConfig, model);
+              if (!resolved) return null;
+              return (
+                <ArchOptionField
+                  key={resolved.key}
+                  option={resolved}
+                  value={architectureConfig[resolved.key]}
+                  onChange={v => updateOption(resolved.key, v)}
+                  disabled={disabled}
+                  tabIndex={open ? 0 : -1}
+                />
+              );
+            })}
+          </section>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -118,9 +179,10 @@ interface ArchOptionFieldProps {
   value: unknown;
   onChange: (v: unknown) => void;
   disabled?: boolean;
+  tabIndex?: number;
 }
 
-function ArchOptionField({ option, value, onChange, disabled }: ArchOptionFieldProps) {
+function ArchOptionField({ option, value, onChange, disabled, tabIndex }: ArchOptionFieldProps) {
   const fieldId = `ac-opt-${option.key}`;
 
   if (option.type === 'boolean') {
@@ -134,6 +196,7 @@ function ArchOptionField({ option, value, onChange, disabled }: ArchOptionFieldP
             checked={value === true}
             onChange={e => onChange(e.target.checked ? true : undefined)}
             disabled={disabled}
+            tabIndex={tabIndex}
           />
           {' '}{option.label}
         </label>
@@ -152,6 +215,7 @@ function ArchOptionField({ option, value, onChange, disabled }: ArchOptionFieldP
           value={(value as string | undefined) ?? ''}
           onChange={e => onChange(e.target.value === '' ? undefined : e.target.value)}
           disabled={disabled}
+          tabIndex={tabIndex}
         >
           <option value="">{option.default != null ? `Default (${option.default})` : '—'}</option>
           {option.values?.map(v => (
@@ -183,6 +247,7 @@ function ArchOptionField({ option, value, onChange, disabled }: ArchOptionFieldP
           }}
           placeholder={option.placeholder ?? (option.default != null ? String(option.default) : '')}
           disabled={disabled}
+          tabIndex={tabIndex}
         />
         {option.description && <small data-ac="advanced-help">{option.description}</small>}
       </div>
@@ -201,6 +266,7 @@ function ArchOptionField({ option, value, onChange, disabled }: ArchOptionFieldP
         onChange={e => onChange(e.target.value === '' ? undefined : e.target.value)}
         placeholder={option.placeholder ?? (option.default != null ? String(option.default) : '')}
         disabled={disabled}
+        tabIndex={tabIndex}
       />
       {option.description && <small data-ac="advanced-help">{option.description}</small>}
     </div>

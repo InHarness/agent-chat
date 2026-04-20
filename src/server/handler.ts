@@ -1,7 +1,7 @@
 import { resolve } from 'path';
 import type { Request, Response } from 'express';
 import type { RuntimeAdapter, UnifiedEvent } from '@inharness/agent-adapters';
-import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions } from '@inharness/agent-adapters';
+import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions, getModelContextWindow } from '@inharness/agent-adapters';
 import type {
   ArchitectureConfig,
   ServerConfig,
@@ -115,6 +115,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const assistantBlocks: StoredContentBlock[] = [];
     const subagentMessages = new Map<string, StoredMessage[]>();
     let resultSessionId: string | undefined;
+    let resultUsage: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } | undefined;
 
     // Look up existing session for resumption
     const existingThread = threads.get(threadId);
@@ -164,7 +165,9 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         collectBlock(event, assistantBlocks, subagentMessages);
 
         if (event.type === 'result') {
-          resultSessionId = (event as { sessionId?: string }).sessionId;
+          const resultEvent = event as { sessionId?: string; usage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } };
+          resultSessionId = resultEvent.sessionId;
+          resultUsage = resultEvent.usage;
           sessions.setSessionId(requestId, resultSessionId!);
         }
       }
@@ -186,6 +189,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         role: 'assistant',
         blocks: assistantBlocks,
         timestamp: new Date().toISOString(),
+        ...(resultUsage ? { usage: resultUsage } : {}),
       };
       threads.appendMessages(threadId!, [userMessage, assistantMessage], resultSessionId);
     }
@@ -325,10 +329,16 @@ function buildDefaultArchitectures(): Record<string, ArchitectureConfig> {
   for (const arch of listArchitectures()) {
     const models = getModelsForArchitecture(arch);
     if (models && models.length > 0) {
+      const contextWindows: Record<string, number> = {};
+      for (const m of models) {
+        const window = getModelContextWindow(arch, m.alias);
+        if (window !== undefined) contextWindows[m.alias] = window;
+      }
       result[arch] = {
         models: models.map(m => m.alias),
         default: models[0].alias,
         options: getArchitectureOptions(arch),
+        ...(Object.keys(contextWindows).length > 0 ? { contextWindows } : {}),
       };
     }
   }
@@ -356,6 +366,7 @@ function appendToSubagentMessages(sub: StoredContentBlock & { type: 'subagent' }
       role: 'assistant',
       blocks: [block],
       timestamp: new Date().toISOString(),
+      subagentTaskId: sub.taskId,
     });
   }
 }
@@ -436,11 +447,12 @@ function collectBlock(
       break;
     }
     case 'subagent_completed': {
-      const e = event as { taskId: string; status: string; summary?: string };
+      const e = event as { taskId: string; status: string; summary?: string; usage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } };
       const sub = blocks.find(b => b.type === 'subagent' && b.taskId === e.taskId) as StoredContentBlock & { type: 'subagent' } | undefined;
       if (sub) {
         sub.status = e.status;
         sub.summary = e.summary;
+        if (e.usage) sub.usage = e.usage;
       }
       break;
     }

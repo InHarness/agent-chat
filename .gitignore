@@ -4,3 +4,4 @@ examples/basic/threads/
 examples/basic/.env
 .env
 .env.local
+.claude/scheduled_tasks.lock

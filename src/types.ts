@@ -19,7 +19,7 @@ export type UIContentBlock =
   | { type: 'toolUse'; toolUseId: string; toolName: string; input: unknown; collapsed: boolean }
   | { type: 'toolResult'; toolUseId: string; content: string; isError: boolean; collapsed: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
-  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[] };
+  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[]; usage?: UsageStats };
 
 // --- Chat Message ---
 
@@ -29,6 +29,8 @@ export interface ChatMessage {
   blocks: UIContentBlock[];
   timestamp: string;
   isStreaming: boolean;
+  subagentTaskId?: string;
+  usage?: UsageStats;
 }
 
 // --- Chat State ---
@@ -45,6 +47,8 @@ export interface SubagentState {
 export interface UsageStats {
   inputTokens: number;
   outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
 }
 
 export interface ChatState {
@@ -70,6 +74,7 @@ export interface AgentChatConfig {
 export interface AgentChatProps {
   serverUrl: string;
   theme?: 'light' | 'dark';
+  onThemeChange?: (theme: 'light' | 'dark') => void;
   className?: string;
   showConfigBar?: boolean;
   showThreadList?: boolean;
@@ -99,16 +104,19 @@ export function storedBlockToUI(block: StoredContentBlock): UIContentBlock {
         status: block.status,
         summary: block.summary,
         messages: block.messages.map(storedMessageToChat),
+        usage: block.usage,
       };
   }
 }
 
-export function storedMessageToChat(msg: { id: string; role: 'user' | 'assistant'; blocks: StoredContentBlock[]; timestamp: string }): ChatMessage {
+export function storedMessageToChat(msg: { id: string; role: 'user' | 'assistant'; blocks: StoredContentBlock[]; timestamp: string; subagentTaskId?: string; usage?: UsageStats }): ChatMessage {
   return {
     id: msg.id,
     role: msg.role,
     blocks: msg.blocks.map(storedBlockToUI),
     timestamp: msg.timestamp,
     isStreaming: false,
+    subagentTaskId: msg.subagentTaskId,
+    usage: msg.usage,
   };
 }

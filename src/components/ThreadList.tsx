@@ -9,12 +9,25 @@ interface ThreadListProps {
   onDelete: (threadId: string) => void;
   onRename: (threadId: string, title: string) => void;
   onNewThread: () => void;
+  onClose?: () => void;
+  collapsed?: boolean;
 }
 
-export function ThreadList({ threads, activeThreadId, onSelect, onDelete, onRename, onNewThread }: ThreadListProps) {
+export function ThreadList({ threads, activeThreadId, onSelect, onDelete, onRename, onNewThread, onClose, collapsed }: ThreadListProps) {
   return (
-    <div data-ac="thread-list">
+    <div data-ac="thread-list" data-ac-collapsed={collapsed ? 'true' : undefined} aria-hidden={collapsed ? 'true' : undefined}>
       <div data-ac="thread-list-header">
+        {onClose && (
+          <button
+            data-ac="thread-list-close"
+            onClick={onClose}
+            type="button"
+            aria-label="Hide conversations"
+            title="Hide conversations"
+          >
+            {'\u2715'}
+          </button>
+        )}
         <span data-ac="thread-list-title">Conversations</span>
         <button data-ac="new-thread-button" onClick={onNewThread} type="button">
           + New

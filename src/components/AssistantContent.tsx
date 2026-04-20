@@ -45,7 +45,16 @@ export function AssistantContent({ blocks }: AssistantContentProps) {
             return <ThinkingBlock key={key} text={block.text} isStreaming={block.isStreaming} defaultCollapsed={block.collapsed} />;
           case 'toolUse': {
             const result = resultByToolUseId.get(block.toolUseId);
-            const subagent = subagentByToolUseId.get(block.toolUseId);
+            const subagentBlock = subagentByToolUseId.get(block.toolUseId);
+            const subagent = subagentBlock
+              ? {
+                  description: subagentBlock.description,
+                  status: subagentBlock.status,
+                  summary: subagentBlock.summary,
+                  messages: subagentBlock.messages,
+                  usage: subagentBlock.usage,
+                }
+              : undefined;
             return <ToolUseBlock key={key} toolName={block.toolName} toolUseId={block.toolUseId} input={block.input} defaultCollapsed={block.collapsed} result={result} subagent={subagent} />;
           }
           case 'toolResult':

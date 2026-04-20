@@ -197,6 +197,11 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     if (id) activeThreadIdRef.current = id;
   }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig, planMode]);
 
+  const archEntry = agentConfig.config?.architectures[agentConfig.architecture];
+  const overrideRaw = architectureConfig['context_window_override'];
+  const override = typeof overrideRaw === 'number' && Number.isFinite(overrideRaw) && overrideRaw > 0 ? overrideRaw : undefined;
+  const contextWindow = override ?? archEntry?.contextWindows?.[agentConfig.model];
+
   return {
     // Conversation state
     messages: state.messages,
@@ -204,6 +209,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     error: state.error,
     usage: state.usage,
     sessionId: state.sessionId,
+    contextWindow,
 
     // Config
     config: agentConfig.config,

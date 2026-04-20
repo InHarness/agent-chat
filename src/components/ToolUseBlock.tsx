@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import type { ChatMessage } from '../types.js';
+import type { ChatMessage, UsageStats } from '../types.js';
 import { AssistantContent } from './AssistantContent.js';
+import { useContextWindow } from './ContextWindowContext.js';
+import { totalContextTokens, contextLevel } from './UsageDisplay.js';
 
 interface ToolUseResult {
   content: string;
@@ -13,6 +15,7 @@ interface ToolUseSubagent {
   status: string;
   summary?: string;
   messages: ChatMessage[];
+  usage?: UsageStats;
 }
 
 interface ToolUseBlockProps {
@@ -34,6 +37,7 @@ function extractDescription(input: unknown): string | null {
 
 export function ToolUseBlock({ toolName, input, defaultCollapsed = true, result, subagent }: ToolUseBlockProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const contextWindow = useContextWindow();
 
   const icon = subagent
     ? (subagent.status === 'running' ? '⟳' : subagent.status === 'completed' ? '✓' : '✕')
@@ -42,6 +46,14 @@ export function ToolUseBlock({ toolName, input, defaultCollapsed = true, result,
       : '⟳';
 
   const description = subagent ? null : extractDescription(input);
+
+  const subagentCtx = subagent?.usage && contextWindow
+    ? (() => {
+        const total = totalContextTokens(subagent.usage);
+        const pct = Math.min(100, (total / contextWindow) * 100);
+        return { pct, level: contextLevel(pct) };
+      })()
+    : null;
 
   return (
     <div data-ac="tool-call" data-collapsed={collapsed || undefined} data-has-result={!!result || undefined} data-has-subagent={!!subagent || undefined}>
@@ -53,6 +65,11 @@ export function ToolUseBlock({ toolName, input, defaultCollapsed = true, result,
         <span data-ac="tool-use-icon">{icon}</span>
         <span data-ac="tool-use-name">{subagent ? subagent.description : toolName}</span>
         {description && <span data-ac="tool-use-description">{description}</span>}
+        {subagentCtx && (
+          <span data-ac="subagent-ctx-badge" data-level={subagentCtx.level} title="Subagent context window usage">
+            ctx {subagentCtx.pct.toFixed(0)}%
+          </span>
+        )}
         <span data-ac="toggle-arrow">{collapsed ? '▸' : '▾'}</span>
       </button>
       {!collapsed && (

@@ -60,7 +60,10 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
     case 'EVENT':
       return handleEvent(state, action.event);
 
-    case 'RESTORE':
+    case 'RESTORE': {
+      const lastAssistantUsage = [...action.messages]
+        .reverse()
+        .find(m => m.role === 'assistant' && m.usage)?.usage ?? null;
       return {
         ...state,
         messages: action.messages,
@@ -68,11 +71,12 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         activeSubagents: new Map(),
         isStreaming: false,
         error: null,
-        usage: null,
+        usage: lastAssistantUsage,
         sessionId: action.sessionId ?? null,
         architecture: action.architecture,
         model: action.model,
       };
+    }
 
     case 'SET_ARCHITECTURE':
       return {
@@ -267,7 +271,7 @@ function handleSubagentProgress(state: ChatState, event: { taskId: string; descr
   );
 }
 
-function handleSubagentCompleted(state: ChatState, event: { taskId: string; status: string; summary?: string }): ChatState {
+function handleSubagentCompleted(state: ChatState, event: { taskId: string; status: string; summary?: string; usage?: UsageStats }): ChatState {
   const newSubagents = new Map(state.activeSubagents);
   newSubagents.delete(event.taskId);
 
@@ -275,7 +279,7 @@ function handleSubagentCompleted(state: ChatState, event: { taskId: string; stat
     { ...state, activeSubagents: newSubagents },
     (blocks) => blocks.map(b =>
       b.type === 'subagent' && b.taskId === event.taskId
-        ? { ...b, status: event.status, summary: event.summary }
+        ? { ...b, status: event.status, summary: event.summary, usage: event.usage }
         : b
     ),
   );
@@ -415,13 +419,13 @@ function handleSubagentTextDelta(state: ChatState, text: string): ChatState {
   return routeStreamingBlockToSubagent(state, 'text', text);
 }
 
-function handleResult(state: ChatState, event: { output: string; usage: { inputTokens: number; outputTokens: number }; sessionId?: string }): ChatState {
+function handleResult(state: ChatState, event: { output: string; usage: UsageStats; sessionId?: string }): ChatState {
   return {
     ...state,
     isStreaming: false,
     usage: event.usage,
     sessionId: event.sessionId ?? state.sessionId,
-    messages: finalizeActiveMessage(state.messages, state.activeAssistantMessageId),
+    messages: finalizeActiveMessage(state.messages, state.activeAssistantMessageId, event.usage),
     activeAssistantMessageId: null,
     activeSubagents: new Map(),
   };
@@ -442,13 +446,14 @@ function updateActiveMessage(state: ChatState, updater: (blocks: UIContentBlock[
   };
 }
 
-function finalizeActiveMessage(messages: ChatMessage[], activeId: string | null): ChatMessage[] {
+function finalizeActiveMessage(messages: ChatMessage[], activeId: string | null, usage?: UsageStats): ChatMessage[] {
   if (!activeId) return messages;
   return messages.map(msg => {
     if (msg.id !== activeId) return msg;
     return {
       ...msg,
       isStreaming: false,
+      ...(usage ? { usage } : {}),
       blocks: msg.blocks.map(b => {
         if ((b.type === 'text' || b.type === 'thinking') && b.isStreaming) {
           return { ...b, isStreaming: false };
