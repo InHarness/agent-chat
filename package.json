@@ -60,7 +60,7 @@
     "rehype-highlight": "^7.0.0"
   },
   "devDependencies": {
-    "@inharness-ai/agent-adapters": "file:../agent-adapters",
+    "@inharness-ai/agent-adapters": "^0.2.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

@@ -8,3 +8,4 @@ examples/basic/.env
 .claude4spec/
 .gitignore
 .claude/skills/index.md
+buddy.yml
