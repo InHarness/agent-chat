@@ -31,10 +31,10 @@ export interface WireNormalizedMessage {
 
 export type WireEvent =
   | { type: 'connected'; requestId: string }
-  | { type: 'text_delta'; text: string; isSubagent: boolean }
-  | { type: 'thinking'; text: string; isSubagent: boolean; replace?: boolean }
-  | { type: 'tool_use'; toolName: string; toolUseId: string; input: unknown; isSubagent: boolean }
-  | { type: 'tool_result'; toolUseId: string; summary: string; isSubagent: boolean }
+  | { type: 'text_delta'; text: string; isSubagent: boolean; subagentTaskId?: string }
+  | { type: 'thinking'; text: string; isSubagent: boolean; replace?: boolean; subagentTaskId?: string }
+  | { type: 'tool_use'; toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string }
+  | { type: 'tool_result'; toolUseId: string; summary: string; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'assistant_message'; message: WireNormalizedMessage }
   | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }
   | { type: 'subagent_progress'; taskId: string; description: string; lastToolName?: string }

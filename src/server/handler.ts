@@ -356,6 +356,19 @@ function findActiveSubagentBlock(blocks: StoredContentBlock[]): (StoredContentBl
   return undefined;
 }
 
+function resolveSubagentBlock(
+  blocks: StoredContentBlock[],
+  subagentTaskId: string | undefined,
+): (StoredContentBlock & { type: 'subagent' }) | undefined {
+  if (subagentTaskId) {
+    const byId = blocks.find(b => b.type === 'subagent' && b.taskId === subagentTaskId) as
+      | (StoredContentBlock & { type: 'subagent' })
+      | undefined;
+    if (byId) return byId;
+  }
+  return findActiveSubagentBlock(blocks);
+}
+
 function appendToSubagentMessages(sub: StoredContentBlock & { type: 'subagent' }, block: StoredContentBlock): void {
   const lastMsg = sub.messages[sub.messages.length - 1];
   if (lastMsg && lastMsg.role === 'assistant') {
@@ -378,9 +391,9 @@ function collectBlock(
 ): void {
   switch (event.type) {
     case 'text_delta': {
-      const e = event as { text: string; isSubagent: boolean };
+      const e = event as { text: string; isSubagent: boolean; subagentTaskId?: string };
       if (e.isSubagent) {
-        const sub = findActiveSubagentBlock(blocks);
+        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
         if (!sub) return;
         const lastMsg = sub.messages[sub.messages.length - 1];
         const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
@@ -400,9 +413,9 @@ function collectBlock(
       break;
     }
     case 'thinking': {
-      const e = event as { text: string; isSubagent: boolean; replace?: boolean };
+      const e = event as { text: string; isSubagent: boolean; replace?: boolean; subagentTaskId?: string };
       if (e.isSubagent) {
-        const sub = findActiveSubagentBlock(blocks);
+        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
         if (!sub) return;
         const lastMsg = sub.messages[sub.messages.length - 1];
         const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
@@ -422,9 +435,9 @@ function collectBlock(
       break;
     }
     case 'tool_use': {
-      const e = event as { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean };
+      const e = event as { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string };
       if (e.isSubagent) {
-        const sub = findActiveSubagentBlock(blocks);
+        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
         if (sub) appendToSubagentMessages(sub, { type: 'toolUse', toolUseId: e.toolUseId, toolName: e.toolName, input: e.input });
         return;
       }
@@ -432,9 +445,9 @@ function collectBlock(
       break;
     }
     case 'tool_result': {
-      const e = event as unknown as { toolUseId: string; summary: string; isSubagent: boolean };
+      const e = event as unknown as { toolUseId: string; summary: string; isSubagent: boolean; subagentTaskId?: string };
       if (e.isSubagent) {
-        const sub = findActiveSubagentBlock(blocks);
+        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
         if (sub) appendToSubagentMessages(sub, { type: 'toolResult', toolUseId: e.toolUseId, content: e.summary });
         return;
       }

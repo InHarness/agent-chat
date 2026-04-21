@@ -105,16 +105,16 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
       return state; // No state change needed
 
     case 'text_delta':
-      return handleTextDelta(state, event.text, event.isSubagent);
+      return handleTextDelta(state, event.text, event.isSubagent, event.subagentTaskId);
 
     case 'thinking':
-      return handleThinking(state, event.text, event.isSubagent, event.replace);
+      return handleThinking(state, event.text, event.isSubagent, event.replace, event.subagentTaskId);
 
     case 'tool_use':
       return handleToolUse(state, event);
 
     case 'tool_result':
-      return handleToolResult(state, event.toolUseId, event.summary, event.isSubagent);
+      return handleToolResult(state, event.toolUseId, event.summary, event.isSubagent, event.subagentTaskId);
 
     case 'assistant_message':
       return state; // We build from deltas, don't need to replace
@@ -149,9 +149,9 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
   }
 }
 
-function handleTextDelta(state: ChatState, text: string, isSubagent: boolean): ChatState {
+function handleTextDelta(state: ChatState, text: string, isSubagent: boolean, subagentTaskId?: string): ChatState {
   if (isSubagent) {
-    return handleSubagentTextDelta(state, text);
+    return handleSubagentTextDelta(state, text, subagentTaskId);
   }
 
   return updateActiveMessage(state, (blocks) => {
@@ -163,9 +163,9 @@ function handleTextDelta(state: ChatState, text: string, isSubagent: boolean): C
   });
 }
 
-function handleThinking(state: ChatState, text: string, isSubagent: boolean, replace?: boolean): ChatState {
+function handleThinking(state: ChatState, text: string, isSubagent: boolean, replace?: boolean, subagentTaskId?: string): ChatState {
   if (isSubagent) {
-    return routeStreamingBlockToSubagent(state, 'thinking', text, replace);
+    return routeStreamingBlockToSubagent(state, 'thinking', text, replace, subagentTaskId);
   }
 
   return updateActiveMessage(state, (blocks) => {
@@ -180,7 +180,7 @@ function handleThinking(state: ChatState, text: string, isSubagent: boolean, rep
   });
 }
 
-function handleToolUse(state: ChatState, event: { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean }): ChatState {
+function handleToolUse(state: ChatState, event: { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string }): ChatState {
   if (event.isSubagent) {
     return routeBlockToSubagent(state, {
       type: 'toolUse' as const,
@@ -188,7 +188,7 @@ function handleToolUse(state: ChatState, event: { toolName: string; toolUseId: s
       toolName: event.toolName,
       input: event.input,
       collapsed: true,
-    }, true);
+    }, true, event.subagentTaskId);
   }
 
   return updateActiveMessage(state, (blocks) => {
@@ -208,9 +208,9 @@ function handleToolUse(state: ChatState, event: { toolName: string; toolUseId: s
   });
 }
 
-function handleToolResult(state: ChatState, toolUseId: string, summary: string, isSubagent: boolean): ChatState {
+function handleToolResult(state: ChatState, toolUseId: string, summary: string, isSubagent: boolean, subagentTaskId?: string): ChatState {
   if (isSubagent) {
-    return routeToolResultToSubagent(state, toolUseId, summary);
+    return routeToolResultToSubagent(state, toolUseId, summary, subagentTaskId);
   }
 
   return updateActiveMessage(state, (blocks) => {
@@ -290,8 +290,16 @@ function getActiveSubagent(state: ChatState): SubagentState | null {
   return running.length > 0 ? running[running.length - 1] : null;
 }
 
-function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeStreaming = false): ChatState {
-  const activeSubagent = getActiveSubagent(state);
+function resolveSubagent(state: ChatState, subagentTaskId?: string): SubagentState | null {
+  if (subagentTaskId) {
+    const byId = state.activeSubagents.get(subagentTaskId);
+    if (byId) return byId;
+  }
+  return getActiveSubagent(state);
+}
+
+function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeStreaming = false, subagentTaskId?: string): ChatState {
+  const activeSubagent = resolveSubagent(state, subagentTaskId);
   if (!activeSubagent) return state;
 
   return updateActiveMessage(state, (blocks) =>
@@ -326,8 +334,8 @@ function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeS
   );
 }
 
-function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'thinking', text: string, replace?: boolean): ChatState {
-  const activeSubagent = getActiveSubagent(state);
+function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'thinking', text: string, replace?: boolean, subagentTaskId?: string): ChatState {
+  const activeSubagent = resolveSubagent(state, subagentTaskId);
   if (!activeSubagent) return state;
 
   return updateActiveMessage(state, (blocks) =>
@@ -369,8 +377,8 @@ function routeStreamingBlockToSubagent(state: ChatState, blockType: 'text' | 'th
   );
 }
 
-function routeToolResultToSubagent(state: ChatState, toolUseId: string, summary: string): ChatState {
-  const activeSubagent = getActiveSubagent(state);
+function routeToolResultToSubagent(state: ChatState, toolUseId: string, summary: string, subagentTaskId?: string): ChatState {
+  const activeSubagent = resolveSubagent(state, subagentTaskId);
   if (!activeSubagent) return state;
 
   return updateActiveMessage(state, (blocks) =>
@@ -415,8 +423,8 @@ function routeToolResultToSubagent(state: ChatState, toolUseId: string, summary:
   );
 }
 
-function handleSubagentTextDelta(state: ChatState, text: string): ChatState {
-  return routeStreamingBlockToSubagent(state, 'text', text);
+function handleSubagentTextDelta(state: ChatState, text: string, subagentTaskId?: string): ChatState {
+  return routeStreamingBlockToSubagent(state, 'text', text, undefined, subagentTaskId);
 }
 
 function handleResult(state: ChatState, event: { output: string; usage: UsageStats; sessionId?: string }): ChatState {
