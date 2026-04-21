@@ -1,23 +1,31 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { UIContentBlock } from '../types.js';
 import { TextBlock } from './TextBlock.js';
 import { ThinkingBlock } from './ThinkingBlock.js';
 import { ToolUseBlock } from './ToolUseBlock.js';
 import { ToolResultBlock } from './ToolResultBlock.js';
+import { ToolBatchBlock } from './ToolBatchBlock.js';
 import { ImageBlock } from './ImageBlock.js';
 import { SubagentPanel } from './SubagentPanel.js';
+import { batchToolBlocks } from '../utils/batchToolBlocks.js';
 
 interface AssistantContentProps {
   blocks: UIContentBlock[];
+  batchTools?: boolean;
 }
 
-export function AssistantContent({ blocks }: AssistantContentProps) {
+export function AssistantContent({ blocks, batchTools }: AssistantContentProps) {
+  const renderBlocks = useMemo(
+    () => (batchTools ? batchToolBlocks(blocks) : blocks),
+    [blocks, batchTools],
+  );
+
   // Build maps for pairing toolUse ↔ toolResult ↔ subagent by toolUseId
   const resultByToolUseId = new Map<string, { content: string; isError: boolean; collapsed: boolean }>();
   const subagentByToolUseId = new Map<string, UIContentBlock & { type: 'subagent' }>();
   const pairedToolUseIds = new Set<string>();
 
-  for (const block of blocks) {
+  for (const block of renderBlocks) {
     if (block.type === 'toolResult') {
       resultByToolUseId.set(block.toolUseId, { content: block.content, isError: block.isError, collapsed: block.collapsed });
     }
@@ -27,7 +35,7 @@ export function AssistantContent({ blocks }: AssistantContentProps) {
   }
 
   // Mark which toolUseIds have a matching toolUse block (for skipping standalone renders)
-  for (const block of blocks) {
+  for (const block of renderBlocks) {
     if (block.type === 'toolUse') {
       if (resultByToolUseId.has(block.toolUseId)) pairedToolUseIds.add(block.toolUseId);
       if (subagentByToolUseId.has(block.toolUseId)) pairedToolUseIds.add(block.toolUseId);
@@ -36,7 +44,7 @@ export function AssistantContent({ blocks }: AssistantContentProps) {
 
   return (
     <div data-ac="assistant-content">
-      {blocks.map((block, i) => {
+      {renderBlocks.map((block, i) => {
         const key = blockKey(block, i);
         switch (block.type) {
           case 'text':
@@ -60,6 +68,8 @@ export function AssistantContent({ blocks }: AssistantContentProps) {
           case 'toolResult':
             if (pairedToolUseIds.has(block.toolUseId)) return null;
             return <ToolResultBlock key={key} toolUseId={block.toolUseId} content={block.content} isError={block.isError} defaultCollapsed={block.collapsed} />;
+          case 'toolBatch':
+            return <ToolBatchBlock key={key} category={block.category} items={block.items} />;
           case 'image':
             return <ImageBlock key={key} source={block.source} />;
           case 'subagent':
@@ -79,6 +89,7 @@ function blockKey(block: UIContentBlock, index: number): string {
     case 'toolUse': return `tu-${block.toolUseId}`;
     case 'toolResult': return `tr-${block.toolUseId}`;
     case 'subagent': return `sa-${block.taskId}`;
+    case 'toolBatch': return `tb-${block.items.map(i => i.toolUseId).join('-')}`;
     default: return `${block.type}-${index}`;
   }
 }

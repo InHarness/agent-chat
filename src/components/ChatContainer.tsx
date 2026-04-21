@@ -5,9 +5,10 @@ import { MessageList } from './MessageList.js';
 interface ChatContainerProps {
   messages: ChatMessage[];
   isStreaming: boolean;
+  batchTools?: boolean;
 }
 
-export function ChatContainer({ messages, isStreaming }: ChatContainerProps) {
+export function ChatContainer({ messages, isStreaming, batchTools }: ChatContainerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages or streaming
@@ -28,7 +29,7 @@ export function ChatContainer({ messages, isStreaming }: ChatContainerProps) {
           Start a conversation
         </div>
       ) : (
-        <MessageList messages={messages} />
+        <MessageList messages={messages} batchTools={batchTools} />
       )}
     </div>
   );

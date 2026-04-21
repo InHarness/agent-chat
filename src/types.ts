@@ -6,12 +6,21 @@ import type {
   ThreadMeta,
   StoredContentBlock,
 } from './server/protocol.js';
+import type { ToolCategory } from './utils/toolCategory.js';
 
 // Re-export wire types for consumers
 export type { WireEvent, ServerConfig, ThreadMeta };
 export type { ArchOption, ArchOptionType } from '@inharness/agent-adapters';
+export type { ToolCategory } from './utils/toolCategory.js';
 
 // --- UI Content Blocks ---
+
+export interface ToolBatchItem {
+  toolUseId: string;
+  toolName: string;
+  input: unknown;
+  result?: { content: string; isError: boolean };
+}
 
 export type UIContentBlock =
   | { type: 'text'; text: string; isStreaming: boolean }
@@ -19,7 +28,8 @@ export type UIContentBlock =
   | { type: 'toolUse'; toolUseId: string; toolName: string; input: unknown; collapsed: boolean }
   | { type: 'toolResult'; toolUseId: string; content: string; isError: boolean; collapsed: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
-  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[]; usage?: UsageStats };
+  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[]; usage?: UsageStats }
+  | { type: 'toolBatch'; category: ToolCategory; items: ToolBatchItem[] };
 
 // --- Chat Message ---
 
@@ -79,6 +89,11 @@ export interface AgentChatProps {
   showConfigBar?: boolean;
   showThreadList?: boolean;
   showUsage?: boolean;
+  /**
+   * When true, consecutive same-category tool calls are grouped into a single
+   * expandable summary block (e.g. "Edited 5 files"). Default: false.
+   */
+  batchTools?: boolean;
 }
 
 // --- Conversion helpers ---

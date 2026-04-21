@@ -768,6 +768,50 @@
   overflow-y: auto;
 }
 
+/* === Tool Batch Block === */
+
+[data-ac="tool-batch"] {
+  background: var(--ac-bg-tool);
+  border: 1px solid var(--ac-border-color);
+  border-radius: var(--ac-border-radius);
+  margin: 0.375em 0;
+}
+
+[data-ac="tool-batch-toggle"] {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--ac-font-size-sm);
+  color: var(--ac-text-primary);
+  text-align: left;
+}
+
+[data-ac="tool-batch-icon"] {
+  font-size: 0.875rem;
+}
+
+[data-ac="tool-batch-label"] {
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+}
+
+[data-ac="tool-batch-body"] {
+  padding: 0 0.5rem 0.5rem;
+  border-top: 1px solid var(--ac-border-color);
+}
+
+[data-ac="tool-batch-body"] [data-ac="tool-use"],
+[data-ac="tool-batch-body"] [data-ac="tool-call"] {
+  margin: 0.25em 0;
+}
+
 /* === Image Block === */
 
 [data-ac="image-block"] {

@@ -4,13 +4,14 @@ import { ChatMessage } from './ChatMessage.js';
 
 interface MessageListProps {
   messages: ChatMessageType[];
+  batchTools?: boolean;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, batchTools }: MessageListProps) {
   return (
     <div data-ac="message-list">
       {messages.map(msg => (
-        <ChatMessage key={msg.id} message={msg} />
+        <ChatMessage key={msg.id} message={msg} batchTools={batchTools} />
       ))}
     </div>
   );

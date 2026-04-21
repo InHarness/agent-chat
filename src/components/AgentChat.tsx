@@ -33,6 +33,7 @@ export function AgentChat({
   showConfigBar = true,
   showThreadList = true,
   showUsage = false,
+  batchTools = false,
 }: AgentChatProps) {
   const chat = useAgentChat({ serverUrl });
   const [sidebarOpen, setSidebarOpen] = useState(() => readStoredFlag(SIDEBAR_STORAGE_KEY, true));
@@ -101,6 +102,7 @@ export function AgentChat({
         <ChatContainer
           messages={chat.messages}
           isStreaming={chat.isStreaming}
+          batchTools={batchTools}
         />
         {chat.error && <ErrorDisplay error={chat.error} />}
         <InputArea

@@ -6,9 +6,10 @@ import { LoadingIndicator } from './LoadingIndicator.js';
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  batchTools?: boolean;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, batchTools }: ChatMessageProps) {
   return (
     <div data-ac="message" data-role={message.role} data-streaming={message.isStreaming || undefined}>
       <div data-ac="message-avatar">
@@ -17,7 +18,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       <div data-ac="message-body">
         {message.role === 'user'
           ? <UserContent blocks={message.blocks} />
-          : <AssistantContent blocks={message.blocks} />
+          : <AssistantContent blocks={message.blocks} batchTools={batchTools} />
         }
         {message.role === 'assistant' && message.isStreaming && message.blocks.length === 0 && (
           <LoadingIndicator />

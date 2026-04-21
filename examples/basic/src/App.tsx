@@ -21,6 +21,7 @@ export function App() {
       showConfigBar
       showThreadList
       showUsage
+      batchTools
     />
   );
 }

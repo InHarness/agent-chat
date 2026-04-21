@@ -10,6 +10,7 @@ export { CodeBlock } from './components/CodeBlock.js';
 export { ThinkingBlock } from './components/ThinkingBlock.js';
 export { ToolUseBlock } from './components/ToolUseBlock.js';
 export { ToolResultBlock } from './components/ToolResultBlock.js';
+export { ToolBatchBlock } from './components/ToolBatchBlock.js';
 export { ImageBlock } from './components/ImageBlock.js';
 export { SubagentPanel } from './components/SubagentPanel.js';
 export { ConfigBar } from './components/ConfigBar.js';
@@ -28,11 +29,17 @@ export { useEventStream } from './hooks/useEventStream.js';
 export { useAgentConfig } from './hooks/useAgentConfig.js';
 export { useThreads } from './hooks/useThreads.js';
 
+// Utilities
+export { batchToolBlocks } from './utils/batchToolBlocks.js';
+export { toolCategory, groupingKey, categoryLabel } from './utils/toolCategory.js';
+
 // Types
 export type {
   ChatMessage as ChatMessageType,
   ChatState,
   UIContentBlock,
+  ToolBatchItem,
+  ToolCategory,
   SubagentState,
   UsageStats,
   AgentChatConfig,
