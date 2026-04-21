@@ -1,7 +1,7 @@
 import { resolve } from 'path';
 import type { Request, Response } from 'express';
-import type { RuntimeAdapter, UnifiedEvent } from '@inharness/agent-adapters';
-import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions, getModelContextWindow } from '@inharness/agent-adapters';
+import type { RuntimeAdapter, UnifiedEvent } from '@inharness-ai/agent-adapters';
+import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions, getModelContextWindow } from '@inharness-ai/agent-adapters';
 import type {
   ArchitectureConfig,
   ServerConfig,
@@ -322,7 +322,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   };
 }
 
-// --- Default architecture config from @inharness/agent-adapters ---
+// --- Default architecture config from @inharness-ai/agent-adapters ---
 
 function buildDefaultArchitectures(): Record<string, ArchitectureConfig> {
   const result: Record<string, ArchitectureConfig> = {};
@@ -481,7 +481,7 @@ function collectBlock(
       break;
     }
     case 'todo_list_updated': {
-      const e = event as { items: import('@inharness/agent-adapters').TodoItem[]; isSubagent: boolean; subagentTaskId?: string };
+      const e = event as { items: import('@inharness-ai/agent-adapters').TodoItem[]; isSubagent: boolean; subagentTaskId?: string };
       if (e.isSubagent) {
         const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
         if (sub) appendToSubagentMessages(sub, { type: 'todoList', items: e.items }, 'todoList');

@@ -8,8 +8,8 @@
     "dev:client": "vite"
   },
   "dependencies": {
-    "@inharness/agent-chat": "file:../../",
-    "@inharness/agent-adapters": "file:../../../agent-adapters",
+    "@inharness-ai/agent-chat": "file:../../",
+    "@inharness-ai/agent-adapters": "file:../../../agent-adapters",
     "@google/gemini-cli-core": "^0.38.0",
     "express": "^5.1.0",
     "cors": "^2.8.5",

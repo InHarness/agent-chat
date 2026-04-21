@@ -11,7 +11,7 @@ export default defineConfig([
     splitting: true,
     clean: true,
     outDir: 'dist',
-    external: ['react', 'react-dom', '@inharness/agent-adapters'],
+    external: ['react', 'react-dom', '@inharness-ai/agent-adapters'],
     esbuildOptions(options) {
       options.jsx = 'automatic';
     },
@@ -33,7 +33,7 @@ export default defineConfig([
     dts: true,
     splitting: true,
     outDir: 'dist',
-    external: ['@inharness/agent-adapters', 'express'],
+    external: ['@inharness-ai/agent-adapters', 'express'],
     platform: 'node',
   },
 ]);

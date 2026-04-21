@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { createChatHandler } from '@inharness/agent-chat/server';
+import { createChatHandler } from '@inharness-ai/agent-chat/server';
 
 const handler = createChatHandler({
   systemPrompt: 'You are a helpful assistant.',

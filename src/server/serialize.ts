@@ -1,6 +1,6 @@
 import type { WireEvent } from './protocol.js';
 
-// Types from @inharness/agent-adapters (imported dynamically to avoid bundling)
+// Types from @inharness-ai/agent-adapters (imported dynamically to avoid bundling)
 interface UnifiedEvent {
   type: string;
   [key: string]: unknown;

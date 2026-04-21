@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ArchOption } from '@inharness/agent-adapters';
+import type { ArchOption } from '@inharness-ai/agent-adapters';
 import type { AgentChatConfig, ChatMessage } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
 import { useMessageReducer } from './useMessageReducer.js';

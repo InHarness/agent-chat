@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ArchOption } from '@inharness/agent-adapters';
+import type { ArchOption } from '@inharness-ai/agent-adapters';
 
 interface AdvancedOptionsProps {
   cwd: string;

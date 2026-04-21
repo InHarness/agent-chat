@@ -5,3 +5,6 @@ examples/basic/.env
 .env
 .env.local
 .claude/scheduled_tasks.lock
+.claude4spec/
+.gitignore
+.claude/skills/index.md

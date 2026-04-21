@@ -1,7 +1,7 @@
 // Wire format types — shared between client and server
-// These mirror UnifiedEvent from @inharness/agent-adapters but are JSON-safe
+// These mirror UnifiedEvent from @inharness-ai/agent-adapters but are JSON-safe
 
-import type { ArchOption, TodoItem } from '@inharness/agent-adapters';
+import type { ArchOption, TodoItem } from '@inharness-ai/agent-adapters';
 
 export interface WireContentBlock {
   type: 'text' | 'thinking' | 'toolUse' | 'toolResult' | 'image' | 'todoList';

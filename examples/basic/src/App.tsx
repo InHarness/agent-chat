@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { AgentChat } from '@inharness/agent-chat';
-import '@inharness/agent-chat/styles';
+import { AgentChat } from '@inharness-ai/agent-chat';
+import '@inharness-ai/agent-chat/styles';
 
 function getInitialTheme(): 'light' | 'dark' {
   const saved = localStorage.getItem('agent-chat-theme');

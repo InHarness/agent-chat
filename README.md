@@ -1,6 +1,6 @@
-# @inharness/agent-chat
+# @inharness-ai/agent-chat
 
-React chat UI kit for [@inharness/agent-adapters](https://github.com/inharness/agent-adapters). Drop-in components and hooks for building AI agent conversations with streaming support.
+React chat UI kit for [@inharness-ai/agent-adapters](https://github.com/inharness/agent-adapters). Drop-in components and hooks for building AI agent conversations with streaming support.
 
 Works with all agent architectures: Claude Code, Codex, OpenCode, Gemini.
 
@@ -19,7 +19,7 @@ Works with all agent architectures: Claude Code, Codex, OpenCode, Gemini.
 ### 1. Install
 
 ```bash
-npm install @inharness/agent-chat @inharness/agent-adapters react react-dom express
+npm install @inharness-ai/agent-chat @inharness-ai/agent-adapters react react-dom express
 ```
 
 ### 2. Server
@@ -28,7 +28,7 @@ npm install @inharness/agent-chat @inharness/agent-adapters react react-dom expr
 // server.ts
 import express from 'express';
 import cors from 'cors';
-import { createChatHandler } from '@inharness/agent-chat/server';
+import { createChatHandler } from '@inharness-ai/agent-chat/server';
 
 const handler = createChatHandler({
   architectures: {
@@ -72,8 +72,8 @@ app.listen(3001, () => console.log('Server running on http://localhost:3001'));
 ### 3. Client — Drop-in
 
 ```tsx
-import { AgentChat } from '@inharness/agent-chat';
-import '@inharness/agent-chat/styles';
+import { AgentChat } from '@inharness-ai/agent-chat';
+import '@inharness-ai/agent-chat/styles';
 
 function App() {
   return (
@@ -83,31 +83,66 @@ function App() {
       showConfigBar={true}
       showThreadList={true}
       showUsage={true}
+      batchTools={false}
     />
   );
 }
 ```
 
+#### `<AgentChat />` props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `serverUrl` | `string` | — | Base URL of the Express server running `createChatHandler`. |
+| `theme` | `'light' \| 'dark'` | `'light'` | Sets `data-ac-theme` on the root element. |
+| `onThemeChange` | `(theme) => void` | — | If provided, shows a theme toggle button in the UI. |
+| `className` | `string` | — | CSS class forwarded to the root element. |
+| `showConfigBar` | `boolean` | `true` | Render the architecture/model dropdowns and advanced-options drawer. |
+| `showThreadList` | `boolean` | `true` | Render the thread sidebar. |
+| `showUsage` | `boolean` | `false` | Render the `UsageDisplay` footer (tokens + context window). |
+| `batchTools` | `boolean` | `false` | Collapse consecutive tool calls of the same category into a single `ToolBatchBlock`. |
+
 ### 3. Client — Custom UI with Hooks
 
 ```tsx
-import { useAgentChat } from '@inharness/agent-chat';
-import '@inharness/agent-chat/styles';
+import { useAgentChat } from '@inharness-ai/agent-chat';
+import '@inharness-ai/agent-chat/styles';
 
 function MyChat() {
   const {
+    // Conversation state
     messages,
     isStreaming,
     error,
+    usage,
+    sessionId,
+    contextWindow,
+    currentTodoItems,
+
+    // Architecture & model
     config,
+    configLoading,
     architecture,
     model,
     setArchitecture,
     setModel,
+
+    // Advanced options (forwarded to the server on each turn)
+    cwd, setCwd, activeCwd, defaultCwd,
+    systemPrompt, setSystemPrompt,
+    maxTurns, setMaxTurns,
+    architectureConfig, setArchitectureConfig, architectureOptions,
+    planMode, setPlanMode,
+
+    // Threads
     threads,
     activeThreadId,
     createThread,
     loadThread,
+    deleteThread,
+    renameThread,
+
+    // Actions
     sendMessage,
     abort,
   } = useAgentChat({ serverUrl: 'http://localhost:3001' });
@@ -157,9 +192,13 @@ All components use `data-ac` attributes for styling. You can use them individual
 | `<ThinkingBlock />` | Collapsible reasoning/thinking block |
 | `<ToolUseBlock />` | Tool invocation card with collapsible input |
 | `<ToolResultBlock />` | Tool result with collapsible output |
+| `<ToolBatchBlock />` | Groups consecutive same-category tool calls into a summary block |
+| `<TodoListBlock />` | Renders a todo-list content block from the agent |
+| `<CurrentTodoList />` | Sticky header showing the thread's active todo list |
 | `<ImageBlock />` | Base64 or URL image |
 | `<SubagentPanel />` | Nested subagent container with progress |
 | `<ConfigBar />` | Architecture and model dropdowns |
+| `<AdvancedOptions />` | Drawer for `cwd`, `systemPrompt`, `maxTurns`, architecture-specific options, plan mode |
 | `<ThreadList />` | Sidebar with conversation list |
 | `<ThreadItem />` | Single thread entry with rename/delete |
 | `<InputArea />` | Text input with send/abort buttons |
@@ -269,15 +308,33 @@ interface ChatHandlerConfig {
   "threadId": "optional-thread-id",
   "architecture": "claude-code",
   "model": "claude-sonnet-4-20250514",
-  "sessionId": "optional-session-id-for-resumption"
+  "sessionId": "optional-session-id-for-resumption",
+  "systemPrompt": "optional per-turn system prompt override",
+  "maxTurns": 20,
+  "allowedTools": ["Read", "Grep"],
+  "architectureConfig": { "extra": "options" },
+  "cwd": "/absolute/path/for/agent",
+  "planMode": false
 }
 ```
 
-If `threadId` is omitted, a new thread is created automatically.
+| Field | Required | Description |
+|---|---|---|
+| `prompt` | ✓ | User message text. |
+| `threadId` | — | Omit to auto-create a new thread. |
+| `architecture` | — | Overrides `defaultArchitecture` for this turn. |
+| `model` | — | Overrides the architecture's default model. |
+| `sessionId` | — | Resume an existing agent session (adapter-specific). |
+| `systemPrompt` | — | Per-turn override of the handler's default system prompt. |
+| `maxTurns` | — | Cap on agent turns for this request. |
+| `allowedTools` | — | Allow-list of tool names the agent may call. |
+| `architectureConfig` | — | Free-form options passed to the architecture adapter (mirrors `ArchOption` choices). |
+| `cwd` | — | Working directory for the agent for this turn (falls back to handler default). |
+| `planMode` | — | If `true`, runs the agent in read-only "plan mode". |
 
 ### SSE Events
 
-The chat endpoint streams events in SSE format. Each event mirrors a [UnifiedEvent](https://github.com/inharness/agent-adapters#unified-events) from agent-adapters:
+The chat endpoint streams events in SSE format. Each event mirrors a [UnifiedEvent](https://github.com/inharness/agent-adapters#unifiedevent) from agent-adapters (the full union is `WireEvent` in `src/server/protocol.ts`):
 
 ```
 event: connected
@@ -286,22 +343,51 @@ data: {"requestId":"...","threadId":"..."}
 event: text_delta
 data: {"type":"text_delta","text":"Hello","isSubagent":false}
 
+event: thinking
+data: {"type":"thinking","text":"...","isSubagent":false,"replace":false}
+
 event: tool_use
 data: {"type":"tool_use","toolName":"Read","toolUseId":"...","input":{...},"isSubagent":false}
+
+event: tool_result
+data: {"type":"tool_result","toolUseId":"...","summary":"...","isSubagent":false}
+
+event: todo_list_updated
+data: {"type":"todo_list_updated","items":[...],"source":"model-tool","isSubagent":false}
+
+event: assistant_message
+data: {"type":"assistant_message","message":{"role":"assistant","content":[...],"timestamp":"...","usage":{...}}}
+
+event: subagent_started
+data: {"type":"subagent_started","taskId":"...","description":"...","toolUseId":"..."}
+
+event: subagent_progress
+data: {"type":"subagent_progress","taskId":"...","description":"...","lastToolName":"Read"}
+
+event: subagent_completed
+data: {"type":"subagent_completed","taskId":"...","status":"success","summary":"..."}
 
 event: result
 data: {"type":"result","output":"...","usage":{"inputTokens":150,"outputTokens":42},"sessionId":"..."}
 
+event: error
+data: {"type":"error","error":"...","code":"..."}
+
+event: flush
+data: {"type":"flush"}
+
 event: done
 data: {}
 ```
+
+Subagent-scoped events (`text_delta`, `thinking`, `tool_use`, `tool_result`, `todo_list_updated`) include a `subagentTaskId` when they belong to a specific subagent run, used for routing into the matching `<SubagentPanel />`.
 
 ## Development
 
 ### Prerequisites
 
 - Node.js >= 18
-- The [`@inharness/agent-adapters`](https://github.com/inharness/agent-adapters) repo cloned as a sibling directory (`../agent-adapters`)
+- The [`@inharness-ai/agent-adapters`](https://github.com/inharness/agent-adapters) repo cloned as a sibling directory (`../agent-adapters`)
 
 ### Setup
 
@@ -360,6 +446,7 @@ src/
 ├── hooks/         # React hooks (useAgentChat, useEventStream, etc.)
 ├── server/        # Express request handlers + session/thread management
 ├── styles/        # CSS (variables, component styles)
+├── utils/         # Tool-batching + tool-category helpers
 ├── types.ts       # Shared TypeScript types
 └── index.ts       # Client entry point
 ```

@@ -7,17 +7,17 @@ import type {
   StoredContentBlock,
 } from './server/protocol.js';
 import type { ToolCategory } from './utils/toolCategory.js';
-import type { TodoItem } from '@inharness/agent-adapters';
+import type { TodoItem } from '@inharness-ai/agent-adapters';
 
 // Re-export wire types for consumers
 export type { WireEvent, ServerConfig, ThreadMeta };
-export type { ArchOption, ArchOptionType } from '@inharness/agent-adapters';
+export type { ArchOption, ArchOptionType } from '@inharness-ai/agent-adapters';
 export type { ToolCategory } from './utils/toolCategory.js';
 /**
  * TODO list item. `activeForm` is populated by claude-code for `in_progress`
  * items (present-continuous label); `priority` is populated by opencode only.
  */
-export type { TodoItem } from '@inharness/agent-adapters';
+export type { TodoItem } from '@inharness-ai/agent-adapters';
 
 // --- UI Content Blocks ---
 

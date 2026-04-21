@@ -1,7 +1,7 @@
 {
-  "name": "@inharness/agent-chat",
+  "name": "@inharness-ai/agent-chat",
   "version": "0.1.0",
-  "description": "React chat UI kit for @inharness/agent-adapters — drop-in components and hooks for AI agent conversations",
+  "description": "React chat UI kit for @inharness-ai/agent-adapters — drop-in components and hooks for AI agent conversations",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -37,20 +37,22 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "dev": "tsup --watch"
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build",
+    "c4s": "npx claude4spec --pages .claude/skills"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
-    "@inharness/agent-adapters": ">=0.1.0",
+    "@inharness-ai/agent-adapters": ">=0.2.0",
     "express": ">=4.0.0"
   },
   "peerDependenciesMeta": {
-    "@inharness/agent-adapters": { "optional": false },
+    "@inharness-ai/agent-adapters": { "optional": false },
     "express": { "optional": true },
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
+    "react": { "optional": false },
+    "react-dom": { "optional": false }
   },
   "dependencies": {
     "react-markdown": "^9.0.0",
@@ -58,7 +60,7 @@
     "rehype-highlight": "^7.0.0"
   },
   "devDependencies": {
-    "@inharness/agent-adapters": "file:../agent-adapters",
+    "@inharness-ai/agent-adapters": "file:../agent-adapters",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
@@ -83,5 +85,16 @@
     "gemini"
   ],
   "license": "MIT",
-  "author": "InHarness"
+  "author": "InHarness",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/InHarness/agent-chat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/InHarness/agent-chat/issues"
+  },
+  "homepage": "https://github.com/InHarness/agent-chat#readme",
+  "publishConfig": {
+    "access": "public"
+  }
 }
