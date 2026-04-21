@@ -103,6 +103,7 @@ export function AgentChat({
           messages={chat.messages}
           isStreaming={chat.isStreaming}
           batchTools={batchTools}
+          currentTodoItems={chat.currentTodoItems}
         />
         {chat.error && <ErrorDisplay error={chat.error} />}
         <InputArea

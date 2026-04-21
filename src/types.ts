@@ -7,11 +7,17 @@ import type {
   StoredContentBlock,
 } from './server/protocol.js';
 import type { ToolCategory } from './utils/toolCategory.js';
+import type { TodoItem } from '@inharness/agent-adapters';
 
 // Re-export wire types for consumers
 export type { WireEvent, ServerConfig, ThreadMeta };
 export type { ArchOption, ArchOptionType } from '@inharness/agent-adapters';
 export type { ToolCategory } from './utils/toolCategory.js';
+/**
+ * TODO list item. `activeForm` is populated by claude-code for `in_progress`
+ * items (present-continuous label); `priority` is populated by opencode only.
+ */
+export type { TodoItem } from '@inharness/agent-adapters';
 
 // --- UI Content Blocks ---
 
@@ -29,7 +35,8 @@ export type UIContentBlock =
   | { type: 'toolResult'; toolUseId: string; content: string; isError: boolean; collapsed: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
   | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[]; usage?: UsageStats }
-  | { type: 'toolBatch'; category: ToolCategory; items: ToolBatchItem[] };
+  | { type: 'toolBatch'; category: ToolCategory; items: ToolBatchItem[] }
+  | { type: 'todoList'; items: TodoItem[] };
 
 // --- Chat Message ---
 
@@ -71,6 +78,8 @@ export interface ChatState {
   sessionId: string | null;
   architecture: string;
   model: string;
+  /** Latest TODO list snapshot for the active thread (sticky header). */
+  currentTodoItems: TodoItem[] | null;
 }
 
 // --- Hook Config ---
@@ -121,6 +130,8 @@ export function storedBlockToUI(block: StoredContentBlock): UIContentBlock {
         messages: block.messages.map(storedMessageToChat),
         usage: block.usage,
       };
+    case 'todoList':
+      return { type: 'todoList', items: block.items };
   }
 }
 

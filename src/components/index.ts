@@ -9,6 +9,8 @@ export { CodeBlock } from './CodeBlock.js';
 export { ThinkingBlock } from './ThinkingBlock.js';
 export { ToolUseBlock } from './ToolUseBlock.js';
 export { ToolResultBlock } from './ToolResultBlock.js';
+export { TodoListBlock } from './TodoListBlock.js';
+export { CurrentTodoList } from './CurrentTodoList.js';
 export { ImageBlock } from './ImageBlock.js';
 export { SubagentPanel } from './SubagentPanel.js';
 export { ConfigBar } from './ConfigBar.js';

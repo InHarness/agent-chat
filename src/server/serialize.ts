@@ -16,7 +16,10 @@ export function serializeSSE(event: string, data: unknown, id?: number): string 
 export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
   switch (event.type) {
     case 'result': {
-      const { rawMessages, ...rest } = event as Record<string, unknown>;
+      // Explicitly strip adapter-side fields that don't belong on the wire:
+      // - rawMessages: full message log, already streamed via individual events.
+      // - todoListSnapshot: redundant — client reducer reconstructs from `todo_list_updated` events.
+      const { rawMessages, todoListSnapshot, ...rest } = event as Record<string, unknown>;
       return {
         type: 'result',
         output: rest.output as string,

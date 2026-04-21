@@ -11,6 +11,8 @@ export { ThinkingBlock } from './components/ThinkingBlock.js';
 export { ToolUseBlock } from './components/ToolUseBlock.js';
 export { ToolResultBlock } from './components/ToolResultBlock.js';
 export { ToolBatchBlock } from './components/ToolBatchBlock.js';
+export { TodoListBlock } from './components/TodoListBlock.js';
+export { CurrentTodoList } from './components/CurrentTodoList.js';
 export { ImageBlock } from './components/ImageBlock.js';
 export { SubagentPanel } from './components/SubagentPanel.js';
 export { ConfigBar } from './components/ConfigBar.js';
@@ -42,6 +44,7 @@ export type {
   ToolCategory,
   SubagentState,
   UsageStats,
+  TodoItem,
   AgentChatConfig,
   AgentChatProps,
 } from './types.js';

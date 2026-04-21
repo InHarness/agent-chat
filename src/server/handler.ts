@@ -369,9 +369,20 @@ function resolveSubagentBlock(
   return findActiveSubagentBlock(blocks);
 }
 
-function appendToSubagentMessages(sub: StoredContentBlock & { type: 'subagent' }, block: StoredContentBlock): void {
+function appendToSubagentMessages(
+  sub: StoredContentBlock & { type: 'subagent' },
+  block: StoredContentBlock,
+  upsertLastIfType?: StoredContentBlock['type'],
+): void {
   const lastMsg = sub.messages[sub.messages.length - 1];
   if (lastMsg && lastMsg.role === 'assistant') {
+    if (upsertLastIfType) {
+      const lastBlock = lastMsg.blocks[lastMsg.blocks.length - 1];
+      if (lastBlock && lastBlock.type === upsertLastIfType) {
+        lastMsg.blocks[lastMsg.blocks.length - 1] = block;
+        return;
+      }
+    }
     lastMsg.blocks.push(block);
   } else {
     sub.messages.push({
@@ -466,6 +477,21 @@ function collectBlock(
         sub.status = e.status;
         sub.summary = e.summary;
         if (e.usage) sub.usage = e.usage;
+      }
+      break;
+    }
+    case 'todo_list_updated': {
+      const e = event as { items: import('@inharness/agent-adapters').TodoItem[]; isSubagent: boolean; subagentTaskId?: string };
+      if (e.isSubagent) {
+        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
+        if (sub) appendToSubagentMessages(sub, { type: 'todoList', items: e.items }, 'todoList');
+        return;
+      }
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === 'todoList') {
+        last.items = e.items;
+      } else {
+        blocks.push({ type: 'todoList', items: e.items });
       }
       break;
     }

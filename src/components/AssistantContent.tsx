@@ -5,6 +5,7 @@ import { ThinkingBlock } from './ThinkingBlock.js';
 import { ToolUseBlock } from './ToolUseBlock.js';
 import { ToolResultBlock } from './ToolResultBlock.js';
 import { ToolBatchBlock } from './ToolBatchBlock.js';
+import { TodoListBlock } from './TodoListBlock.js';
 import { ImageBlock } from './ImageBlock.js';
 import { SubagentPanel } from './SubagentPanel.js';
 import { batchToolBlocks } from '../utils/batchToolBlocks.js';
@@ -70,6 +71,8 @@ export function AssistantContent({ blocks, batchTools }: AssistantContentProps) 
             return <ToolResultBlock key={key} toolUseId={block.toolUseId} content={block.content} isError={block.isError} defaultCollapsed={block.collapsed} />;
           case 'toolBatch':
             return <ToolBatchBlock key={key} category={block.category} items={block.items} />;
+          case 'todoList':
+            return <TodoListBlock key={key} items={block.items} />;
           case 'image':
             return <ImageBlock key={key} source={block.source} />;
           case 'subagent':
@@ -90,6 +93,7 @@ function blockKey(block: UIContentBlock, index: number): string {
     case 'toolResult': return `tr-${block.toolUseId}`;
     case 'subagent': return `sa-${block.taskId}`;
     case 'toolBatch': return `tb-${block.items.map(i => i.toolUseId).join('-')}`;
+    case 'todoList': return `tl-${index}`;
     default: return `${block.type}-${index}`;
   }
 }

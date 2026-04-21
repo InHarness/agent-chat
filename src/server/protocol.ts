@@ -1,10 +1,10 @@
 // Wire format types — shared between client and server
 // These mirror UnifiedEvent from @inharness/agent-adapters but are JSON-safe
 
-import type { ArchOption } from '@inharness/agent-adapters';
+import type { ArchOption, TodoItem } from '@inharness/agent-adapters';
 
 export interface WireContentBlock {
-  type: 'text' | 'thinking' | 'toolUse' | 'toolResult' | 'image';
+  type: 'text' | 'thinking' | 'toolUse' | 'toolResult' | 'image' | 'todoList';
   text?: string;
   toolUseId?: string;
   toolName?: string;
@@ -12,6 +12,7 @@ export interface WireContentBlock {
   content?: string;
   isError?: boolean;
   source?: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string };
+  items?: TodoItem[];
 }
 
 export interface WireUsageStats {
@@ -35,6 +36,7 @@ export type WireEvent =
   | { type: 'thinking'; text: string; isSubagent: boolean; replace?: boolean; subagentTaskId?: string }
   | { type: 'tool_use'; toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'tool_result'; toolUseId: string; summary: string; isSubagent: boolean; subagentTaskId?: string }
+  | { type: 'todo_list_updated'; items: TodoItem[]; source: 'model-tool' | 'session-state'; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'assistant_message'; message: WireNormalizedMessage }
   | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }
   | { type: 'subagent_progress'; taskId: string; description: string; lastToolName?: string }
@@ -109,7 +111,8 @@ export type StoredContentBlock =
   | { type: 'toolUse'; toolUseId: string; toolName: string; input: unknown }
   | { type: 'toolResult'; toolUseId: string; content: string; isError?: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
-  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: StoredMessage[]; usage?: WireUsageStats };
+  | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: StoredMessage[]; usage?: WireUsageStats }
+  | { type: 'todoList'; items: TodoItem[] };
 
 export interface StoredThread {
   id: string;

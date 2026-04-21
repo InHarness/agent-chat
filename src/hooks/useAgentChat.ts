@@ -210,6 +210,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     usage: state.usage,
     sessionId: state.sessionId,
     contextWindow,
+    currentTodoItems: state.currentTodoItems,
 
     // Config
     config: agentConfig.config,

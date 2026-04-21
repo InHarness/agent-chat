@@ -38,6 +38,7 @@ export function batchToolBlocks(blocks: UIContentBlock[]): UIContentBlock[] {
       continue;
     }
 
+    // Non-toolUse blocks (text, thinking, image, toolBatch, todoList) pass through untouched.
     if (block.type !== 'toolUse' || subagentToolUseIds.has(block.toolUseId)) {
       out.push(block);
       i++;

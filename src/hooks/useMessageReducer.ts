@@ -1,5 +1,5 @@
 import { useReducer, useCallback } from 'react';
-import type { ChatState, ChatMessage, UIContentBlock, SubagentState, UsageStats } from '../types.js';
+import type { ChatState, ChatMessage, UIContentBlock, SubagentState, UsageStats, TodoItem } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
 
 // --- Actions ---
@@ -25,7 +25,23 @@ export function createInitialState(architecture: string, model: string): ChatSta
     sessionId: null,
     architecture,
     model,
+    currentTodoItems: null,
   };
+}
+
+function findLatestTodoItems(messages: ChatMessage[]): TodoItem[] | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    for (let j = msg.blocks.length - 1; j >= 0; j--) {
+      const block = msg.blocks[j];
+      if (block.type === 'todoList') return block.items;
+      if (block.type === 'subagent') {
+        const nested = findLatestTodoItems(block.messages);
+        if (nested) return nested;
+      }
+    }
+  }
+  return null;
 }
 
 // --- Reducer ---
@@ -75,6 +91,7 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         sessionId: action.sessionId ?? null,
         architecture: action.architecture,
         model: action.model,
+        currentTodoItems: findLatestTodoItems(action.messages),
       };
     }
 
@@ -115,6 +132,9 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
 
     case 'tool_result':
       return handleToolResult(state, event.toolUseId, event.summary, event.isSubagent, event.subagentTaskId);
+
+    case 'todo_list_updated':
+      return handleTodoListUpdated(state, event);
 
     case 'assistant_message':
       return state; // We build from deltas, don't need to replace
@@ -230,6 +250,38 @@ function handleToolResult(state: ChatState, toolUseId: string, summary: string, 
   });
 }
 
+function handleTodoListUpdated(
+  state: ChatState,
+  event: { items: TodoItem[]; source: 'model-tool' | 'session-state'; isSubagent: boolean; subagentTaskId?: string },
+): ChatState {
+  if (event.isSubagent) {
+    const routed = routeBlockToSubagent(
+      state,
+      { type: 'todoList', items: event.items },
+      true,
+      event.subagentTaskId,
+      'todoList',
+    );
+    return { ...routed, currentTodoItems: event.items };
+  }
+
+  const updated = updateActiveMessage(state, (blocks) => {
+    const last = blocks[blocks.length - 1];
+    if (last && last.type === 'todoList') {
+      return [...blocks.slice(0, -1), { type: 'todoList' as const, items: event.items }];
+    }
+    // Append path: finalize any streaming text/thinking first.
+    const finalized = blocks.map(b =>
+      (b.type === 'text' || b.type === 'thinking') && b.isStreaming
+        ? { ...b, isStreaming: false }
+        : b,
+    );
+    return [...finalized, { type: 'todoList' as const, items: event.items }];
+  });
+
+  return { ...updated, currentTodoItems: event.items };
+}
+
 function handleSubagentStarted(state: ChatState, event: { taskId: string; description: string; toolUseId: string }): ChatState {
   const newSubagents = new Map(state.activeSubagents);
   newSubagents.set(event.taskId, {
@@ -298,7 +350,13 @@ function resolveSubagent(state: ChatState, subagentTaskId?: string): SubagentSta
   return getActiveSubagent(state);
 }
 
-function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeStreaming = false, subagentTaskId?: string): ChatState {
+function routeBlockToSubagent(
+  state: ChatState,
+  block: UIContentBlock,
+  finalizeStreaming = false,
+  subagentTaskId?: string,
+  upsertLastIfType?: UIContentBlock['type'],
+): ChatState {
   const activeSubagent = resolveSubagent(state, subagentTaskId);
   if (!activeSubagent) return state;
 
@@ -311,6 +369,12 @@ function routeBlockToSubagent(state: ChatState, block: UIContentBlock, finalizeS
 
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
         let updatedBlocks = lastMsg.blocks;
+        const lastBlock = updatedBlocks[updatedBlocks.length - 1];
+        if (upsertLastIfType && lastBlock && lastBlock.type === upsertLastIfType) {
+          updatedBlocks = [...updatedBlocks.slice(0, -1), block];
+          subMessages[subMessages.length - 1] = { ...lastMsg, blocks: updatedBlocks };
+          return { ...b, messages: subMessages };
+        }
         if (finalizeStreaming) {
           updatedBlocks = updatedBlocks.map(bl =>
             (bl.type === 'text' || bl.type === 'thinking') && bl.isStreaming
