@@ -9,6 +9,8 @@ import { ThreadList } from './ThreadList.js';
 import { ErrorDisplay } from './ErrorDisplay.js';
 import { UsageDisplay } from './UsageDisplay.js';
 import { ContextWindowContext } from './ContextWindowContext.js';
+import { ToolRendererProvider } from '../tools/ToolRendererContext.js';
+import { UserInputResponderProvider } from './UserInputResponderContext.js';
 
 const SIDEBAR_STORAGE_KEY = 'agent-chat-sidebar-open';
 const ADVANCED_STORAGE_KEY = 'agent-chat-advanced-open';
@@ -34,6 +36,7 @@ export function AgentChat({
   showThreadList = true,
   showUsage = false,
   batchTools = false,
+  toolRenderers,
 }: AgentChatProps) {
   const chat = useAgentChat({ serverUrl });
   const [sidebarOpen, setSidebarOpen] = useState(() => readStoredFlag(SIDEBAR_STORAGE_KEY, true));
@@ -57,6 +60,8 @@ export function AgentChat({
 
   return (
     <ContextWindowContext.Provider value={chat.contextWindow}>
+    <ToolRendererProvider registry={toolRenderers}>
+    <UserInputResponderProvider responder={chat.sendUserInputResponse}>
     <div
       data-ac="chat"
       data-ac-theme={theme}
@@ -161,6 +166,8 @@ export function AgentChat({
         </>
       )}
     </div>
+    </UserInputResponderProvider>
+    </ToolRendererProvider>
     </ContextWindowContext.Provider>
   );
 }

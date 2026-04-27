@@ -11,4 +11,6 @@ export type {
   StoredThread,
   StoredMessage,
   StoredContentBlock,
+  UserInputRequest,
+  UserInputResponse,
 } from './protocol.js';

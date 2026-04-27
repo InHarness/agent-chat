@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ArchOption } from '@inharness-ai/agent-adapters';
+import type { ArchOption, UserInputResponse } from '@inharness-ai/agent-adapters';
 import type { AgentChatConfig, ChatMessage } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
 import { useMessageReducer } from './useMessageReducer.js';
@@ -16,7 +16,7 @@ function buildArchDefaults(options: ArchOption[]): Record<string, unknown> {
 }
 
 export function useAgentChat(chatConfig: AgentChatConfig) {
-  const { serverUrl } = chatConfig;
+  const { serverUrl, endpoints } = chatConfig;
 
   // Config (architectures + models from server)
   const agentConfig = useAgentConfig(serverUrl);
@@ -68,6 +68,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
 
   const threadHook = useThreads({
     serverUrl,
+    endpoints: endpoints?.threads,
     onThreadLoaded: useCallback(
       (
         messages: ChatMessage[],
@@ -109,8 +110,9 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
   }, [threadHook]);
 
   // Event stream
-  const { startStream, abort: abortStream } = useEventStream({
+  const { startStream, joinStream, abort: abortStream } = useEventStream({
     serverUrl,
+    endpoints: endpoints?.stream,
     onEvent,
     onError,
     onConnected,
@@ -145,6 +147,28 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     abortStream();
     handleWireEvent({ type: 'error', error: 'Request aborted', code: 'ABORTED' });
   }, [abortStream, handleWireEvent]);
+
+  const sendUserInputResponse = useCallback(async (requestId: string, response: UserInputResponse) => {
+    // Optimistic local update so the card reflects the answer instantly.
+    handleWireEvent({ type: 'user_input_response', requestId, response });
+    try {
+      const res = await fetch(`${serverUrl}/api/chat/user-input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, response }),
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        throw new Error(err || `user-input failed: ${res.status}`);
+      }
+    } catch (e) {
+      handleWireEvent({
+        type: 'error',
+        error: (e as Error).message ?? 'Failed to submit user input',
+        code: 'USER_INPUT_ERROR',
+      });
+    }
+  }, [serverUrl, handleWireEvent]);
 
   const resetAdvancedOptions = useCallback((archOverride?: string) => {
     setCwd('');
@@ -197,6 +221,17 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     if (id) activeThreadIdRef.current = id;
   }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig, planMode]);
 
+  const loadThread = useCallback(async (threadId: string) => {
+    // Load static history first so the UI paints immediately.
+    await threadHook.loadThread(threadId);
+    // Then attempt to attach to an in-flight stream (if the thread is still
+    // live on the server after an F5 / tab switch). 404 is expected when the
+    // thread is idle — we silently fall back to the static view.
+    if (!stateRef.current.isStreaming) {
+      await joinStream(threadId);
+    }
+  }, [threadHook, joinStream]);
+
   const archEntry = agentConfig.config?.architectures[agentConfig.architecture];
   const overrideRaw = architectureConfig['context_window_override'];
   const override = typeof overrideRaw === 'number' && Number.isFinite(overrideRaw) && overrideRaw > 0 ? overrideRaw : undefined;
@@ -239,12 +274,13 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     threads: threadHook.threads,
     activeThreadId: threadHook.activeThreadId,
     createThread,
-    loadThread: threadHook.loadThread,
+    loadThread,
     deleteThread: threadHook.deleteThread,
     renameThread: threadHook.renameThread,
 
     // Actions
     sendMessage,
     abort,
+    sendUserInputResponse,
   };
 }

@@ -1,7 +1,7 @@
 // Wire format types — shared between client and server
 // These mirror UnifiedEvent from @inharness-ai/agent-adapters but are JSON-safe
 
-import type { ArchOption, TodoItem } from '@inharness-ai/agent-adapters';
+import type { ArchOption, TodoItem, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
 
 export interface WireContentBlock {
   type: 'text' | 'thinking' | 'toolUse' | 'toolResult' | 'image' | 'todoList';
@@ -32,6 +32,7 @@ export interface WireNormalizedMessage {
 
 export type WireEvent =
   | { type: 'connected'; requestId: string }
+  | { type: 'turn_start'; userMessageId: string; assistantMessageId: string; prompt: string; timestamp: string }
   | { type: 'text_delta'; text: string; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'thinking'; text: string; isSubagent: boolean; replace?: boolean; subagentTaskId?: string }
   | { type: 'tool_use'; toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string }
@@ -41,10 +42,15 @@ export type WireEvent =
   | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }
   | { type: 'subagent_progress'; taskId: string; description: string; lastToolName?: string }
   | { type: 'subagent_completed'; taskId: string; status: string; summary?: string; usage?: WireUsageStats }
+  | { type: 'user_input_request'; request: UserInputRequest }
+  | { type: 'user_input_response'; requestId: string; response: UserInputResponse }
   | { type: 'result'; output: string; usage: WireUsageStats; sessionId?: string }
   | { type: 'error'; error: string; code: string }
   | { type: 'flush' }
   | { type: 'done' };
+
+// Re-export user input types so consumers don't need a separate import.
+export type { UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
 
 // --- Chat Request ---
 
@@ -112,7 +118,8 @@ export type StoredContentBlock =
   | { type: 'toolResult'; toolUseId: string; content: string; isError?: boolean }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
   | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: StoredMessage[]; usage?: WireUsageStats }
-  | { type: 'todoList'; items: TodoItem[] };
+  | { type: 'todoList'; items: TodoItem[] }
+  | { type: 'userInputRequest'; requestId: string; request: UserInputRequest; response?: UserInputResponse };
 
 export interface StoredThread {
   id: string;

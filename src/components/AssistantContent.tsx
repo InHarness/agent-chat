@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import type { UIContentBlock } from '../types.js';
+import type { UserInputResponse } from '@inharness-ai/agent-adapters';
 import { TextBlock } from './TextBlock.js';
 import { ThinkingBlock } from './ThinkingBlock.js';
 import { ToolUseBlock } from './ToolUseBlock.js';
@@ -8,6 +9,8 @@ import { ToolBatchBlock } from './ToolBatchBlock.js';
 import { TodoListBlock } from './TodoListBlock.js';
 import { ImageBlock } from './ImageBlock.js';
 import { SubagentPanel } from './SubagentPanel.js';
+import { UserInputRequestBlock } from './UserInputRequestBlock.js';
+import { useUserInputResponder } from './UserInputResponderContext.js';
 import { batchToolBlocks } from '../utils/batchToolBlocks.js';
 
 interface AssistantContentProps {
@@ -16,6 +19,7 @@ interface AssistantContentProps {
 }
 
 export function AssistantContent({ blocks, batchTools }: AssistantContentProps) {
+  const respond = useUserInputResponder();
   const renderBlocks = useMemo(
     () => (batchTools ? batchToolBlocks(blocks) : blocks),
     [blocks, batchTools],
@@ -79,6 +83,15 @@ export function AssistantContent({ blocks, batchTools }: AssistantContentProps) 
             // Skip if paired with a toolUse block
             if (block.toolUseId && pairedToolUseIds.has(block.toolUseId)) return null;
             return <SubagentPanel key={key} taskId={block.taskId} description={block.description} status={block.status} summary={block.summary} messages={block.messages} />;
+          case 'userInputRequest':
+            return (
+              <UserInputRequestBlock
+                key={key}
+                request={block.request}
+                response={block.response}
+                onRespond={respond ?? undefined}
+              />
+            );
           default:
             return null;
         }
@@ -94,6 +107,7 @@ function blockKey(block: UIContentBlock, index: number): string {
     case 'subagent': return `sa-${block.taskId}`;
     case 'toolBatch': return `tb-${block.items.map(i => i.toolUseId).join('-')}`;
     case 'todoList': return `tl-${index}`;
+    case 'userInputRequest': return `ui-${block.requestId}`;
     default: return `${block.type}-${index}`;
   }
 }

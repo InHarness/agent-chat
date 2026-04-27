@@ -1,6 +1,6 @@
 import { resolve } from 'path';
 import type { Request, Response } from 'express';
-import type { RuntimeAdapter, UnifiedEvent } from '@inharness-ai/agent-adapters';
+import type { RuntimeAdapter, UnifiedEvent, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
 import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions, getModelContextWindow } from '@inharness-ai/agent-adapters';
 import type {
   ArchitectureConfig,
@@ -32,7 +32,14 @@ export interface ChatHandler {
   handleCreateThread: (req: Request, res: Response) => void;
   handleDeleteThread: (req: Request, res: Response) => void;
   handleUpdateThread: (req: Request, res: Response) => void;
+  handleUserInput: (req: Request, res: Response) => void;
+  handleStream: (req: Request, res: Response) => void;
   destroy: () => void;
+}
+
+interface PendingUserInput {
+  resolve: (response: UserInputResponse) => void;
+  threadId: string;
 }
 
 export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
@@ -42,6 +49,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   const architectures = config.architectures ?? buildDefaultArchitectures();
   const defaultArchitecture = config.defaultArchitecture ?? Object.keys(architectures)[0];
   const validArchitectures = Object.keys(architectures);
+  const pendingUserInputs = new Map<string, PendingUserInput>();
 
   const handleChat = async (req: Request, res: Response): Promise<void> => {
     // Validate
@@ -86,7 +94,15 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       return;
     }
 
-    sessions.register(requestId, adapter, architecture);
+    // Register per-thread session (broadcast target + replay buffer). When the
+    // thread already has an active stream, reject with 409 so the client can
+    // wait for it to finish (or join via /api/chat/stream/:threadId).
+    const session = sessions.register(threadId, requestId, adapter, architecture);
+    if (!session) {
+      try { adapter.abort(); } catch { /* ignore */ }
+      res.status(409).json({ error: 'STREAM_IN_PROGRESS', threadId });
+      return;
+    }
 
     // SSE headers
     res.writeHead(200, {
@@ -96,21 +112,41 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       'X-Accel-Buffering': 'no',
     });
 
-    // Send connected event with requestId and threadId
-    res.write(serializeSSE('connected', { requestId, threadId }));
+    // Attach this response as the primary listener. The same broadcast is
+    // forwarded to any additional subscribers attached via `handleStream`.
+    const detach = sessions.on(threadId, (evt) => {
+      try {
+        res.write(serializeSSE(evt.type, evt.data, evt.id));
+      } catch {
+        // Connection already closed; removal-sweep will clean up.
+      }
+    });
 
-    // Abort on client disconnect
+    // Abort on client disconnect — but don't cancel the adapter, let it keep
+    // running so late joiners can see the rest of the stream.
     res.on('close', () => {
-      sessions.abort(requestId);
+      detach?.();
     });
 
     // Collect messages for thread persistence
+    const userMessageId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
+    const turnStartTimestamp = new Date().toISOString();
     const userMessage: StoredMessage = {
-      id: crypto.randomUUID(),
+      id: userMessageId,
       role: 'user',
       blocks: [{ type: 'text', text: chatReq.prompt }],
-      timestamp: new Date().toISOString(),
+      timestamp: turnStartTimestamp,
     };
+
+    // Send connected + turn_start via broadcast so joiners see them in replay.
+    sessions.broadcast(threadId, 'connected', { requestId, threadId });
+    sessions.broadcast(threadId, 'turn_start', {
+      userMessageId,
+      assistantMessageId,
+      prompt: chatReq.prompt,
+      timestamp: turnStartTimestamp,
+    });
 
     const assistantBlocks: StoredContentBlock[] = [];
     const subagentMessages = new Map<string, StoredMessage[]>();
@@ -141,7 +177,12 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       }
     }
 
-    let eventId = 0;
+    const onUserInput = (request: UserInputRequest): Promise<UserInputResponse> => {
+      return new Promise<UserInputResponse>((resolvePromise) => {
+        pendingUserInputs.set(request.requestId, { resolve: resolvePromise, threadId: threadId! });
+      });
+    };
+
     try {
       const stream = adapter.execute({
         prompt: chatReq.prompt,
@@ -153,13 +194,14 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         cwd: effectiveCwd,
         architectureConfig: effectiveArchitectureConfig,
         planMode: effectivePlanMode,
+        onUserInput,
       });
 
       for await (const event of stream) {
         config.onEvent?.(event, requestId);
 
         const wireEvent = unifiedEventToWire(event as UnifiedEvent & Record<string, unknown>);
-        res.write(serializeSSE(wireEvent.type, wireEvent, ++eventId));
+        sessions.broadcast(threadId, wireEvent.type, wireEvent);
 
         // Collect blocks for persistence
         collectBlock(event, assistantBlocks, subagentMessages);
@@ -168,7 +210,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
           const resultEvent = event as { sessionId?: string; usage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } };
           resultSessionId = resultEvent.sessionId;
           resultUsage = resultEvent.usage;
-          sessions.setSessionId(requestId, resultSessionId!);
+          if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
         }
       }
     } catch (err) {
@@ -177,15 +219,24 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         error: (err as Error).message ?? String(err),
         code: 'UNKNOWN',
       };
-      res.write(serializeSSE('error', wireError, ++eventId));
+      sessions.broadcast(threadId, 'error', wireError);
     } finally {
-      res.write(serializeSSE('done', {}, ++eventId));
-      res.end();
+      sessions.broadcast(threadId, 'done', {});
+      try { res.end(); } catch { /* ignore */ }
       sessions.remove(requestId);
+
+      // Resolve any still-pending user input prompts for this thread as
+      // 'cancel' so the adapter stream can unwind cleanly.
+      for (const [reqId, pending] of pendingUserInputs) {
+        if (pending.threadId === threadId) {
+          pending.resolve({ action: 'cancel' });
+          pendingUserInputs.delete(reqId);
+        }
+      }
 
       // Persist to thread
       const assistantMessage: StoredMessage = {
-        id: crypto.randomUUID(),
+        id: assistantMessageId,
         role: 'assistant',
         blocks: assistantBlocks,
         timestamp: new Date().toISOString(),
@@ -193,6 +244,96 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       };
       threads.appendMessages(threadId!, [userMessage, assistantMessage], resultSessionId);
     }
+  };
+
+  const handleUserInput = (req: Request, res: Response): void => {
+    const { requestId, response } = req.body as {
+      requestId?: string;
+      response?: UserInputResponse;
+    };
+    if (!requestId || typeof requestId !== 'string') {
+      res.status(400).json({ error: 'requestId is required' });
+      return;
+    }
+    if (!response || typeof response !== 'object') {
+      res.status(400).json({ error: 'response is required' });
+      return;
+    }
+    const pending = pendingUserInputs.get(requestId);
+    if (!pending) {
+      res.status(404).json({ error: 'No pending request with that ID' });
+      return;
+    }
+    pending.resolve(response);
+    pendingUserInputs.delete(requestId);
+
+    // Record the response as a block on the thread so it shows up on reload.
+    const thread = threads.get(pending.threadId);
+    if (thread) {
+      if (attachUserInputResponse(thread.messages, requestId, response)) {
+        threads.update(pending.threadId, { messages: thread.messages });
+      }
+    }
+    res.json({ ok: true });
+  };
+
+  const handleStream = (req: Request, res: Response): void => {
+    const threadId = req.params.threadId as string;
+    if (!threadId) {
+      res.status(400).json({ error: 'threadId is required' });
+      return;
+    }
+    const session = sessions.getByThread(threadId);
+    if (!session) {
+      res.status(404).json({ error: 'No active stream for this thread' });
+      return;
+    }
+
+    // Support `Last-Event-ID` to skip events the client already saw. Browsers
+    // set this automatically on EventSource reconnect.
+    const lastEventIdHeader = req.header('Last-Event-ID');
+    const fromEventId = lastEventIdHeader ? Number.parseInt(lastEventIdHeader, 10) : undefined;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    // Replay buffered events first (filtered by fromEventId when provided).
+    const replay = typeof fromEventId === 'number' && Number.isFinite(fromEventId)
+      ? session.replayBuffer.filter(e => e.id > fromEventId)
+      : session.replayBuffer;
+    for (const evt of replay) {
+      try {
+        res.write(serializeSSE(evt.type, evt.data, evt.id));
+      } catch {
+        return;
+      }
+    }
+
+    // If the session already finished during the grace window, close now so
+    // the client can fall back to the replay-only view.
+    if (session.removalTimer) {
+      try { res.end(); } catch { /* ignore */ }
+      return;
+    }
+
+    const detach = sessions.on(threadId, (evt) => {
+      try {
+        res.write(serializeSSE(evt.type, evt.data, evt.id));
+        if (evt.type === 'done') {
+          try { res.end(); } catch { /* ignore */ }
+        }
+      } catch {
+        // Connection closed
+      }
+    });
+
+    res.on('close', () => {
+      detach?.();
+    });
   };
 
   const handleAbort = (req: Request, res: Response): void => {
@@ -318,8 +459,33 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     handleCreateThread,
     handleDeleteThread,
     handleUpdateThread,
+    handleUserInput,
+    handleStream,
     destroy,
   };
+}
+
+// Walk thread messages and attach a response to the matching userInputRequest
+// block. Returns true if a block was updated.
+function attachUserInputResponse(
+  messages: StoredMessage[],
+  requestId: string,
+  response: UserInputResponse,
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const blocks = messages[i].blocks;
+    for (let j = blocks.length - 1; j >= 0; j--) {
+      const b = blocks[j];
+      if (b.type === 'userInputRequest' && b.requestId === requestId) {
+        blocks[j] = { ...b, response };
+        return true;
+      }
+      if (b.type === 'subagent') {
+        if (attachUserInputResponse(b.messages, requestId, response)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 // --- Default architecture config from @inharness-ai/agent-adapters ---
@@ -493,6 +659,16 @@ function collectBlock(
       } else {
         blocks.push({ type: 'todoList', items: e.items });
       }
+      break;
+    }
+    case 'user_input_request': {
+      const e = event as { request: UserInputRequest };
+      const { native, ...cleanReq } = e.request as unknown as Record<string, unknown>;
+      blocks.push({
+        type: 'userInputRequest',
+        requestId: e.request.requestId,
+        request: cleanReq as unknown as UserInputRequest,
+      });
       break;
     }
   }

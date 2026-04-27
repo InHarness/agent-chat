@@ -210,11 +210,11 @@ All components use `data-ac` attributes for styling. You can use them individual
 
 | Hook | Description |
 |---|---|
-| `useAgentChat(config)` | Top-level hook — composes all others. Returns messages, config, threads, and actions. |
+| `useAgentChat(config)` | Top-level hook — composes all others. Returns messages, config, threads, and actions. Forwards `endpoints` to `useEventStream` / `useThreads`. |
 | `useMessageReducer(arch, model)` | Pure state machine for chat messages. Processes `WireEvent` stream into `ChatMessage[]`. |
-| `useEventStream(options)` | Low-level SSE connection. Parses `POST /api/chat` response into typed events. |
+| `useEventStream(options)` | Low-level SSE connection. Returns `{ startStream, joinStream, abort, disconnect }`. `abort()` stops the turn (closes the local stream **and** tells the server to abort via `POST /api/chat/abort`); `disconnect()` only closes the local stream so the server keeps streaming and persisting — reattach later with `joinStream(threadId)`. Endpoints configurable via `options.endpoints` (`StreamEndpoints`). |
 | `useAgentConfig(serverUrl)` | Fetches `GET /api/config`, tracks current architecture and model. |
-| `useThreads(options)` | CRUD operations on conversation threads. |
+| `useThreads(options)` | CRUD operations on conversation threads. Endpoints configurable via `options.endpoints` (`ThreadsEndpoints`). |
 
 ## Theming
 
@@ -292,13 +292,61 @@ interface ChatHandlerConfig {
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/chat` | Start a chat turn (returns SSE stream) |
-| `POST` | `/api/chat/abort` | Abort an active stream |
+| `POST` | `/api/chat/abort` | Abort an active stream by `requestId` |
+| `GET` | `/api/chat/stream/:threadId` | Join an in-flight stream live (used after F5 / thread switch) |
 | `GET` | `/api/config` | Available architectures and models |
 | `GET` | `/api/threads` | List all threads (metadata only) |
 | `POST` | `/api/threads` | Create a new thread |
 | `GET` | `/api/threads/:id` | Get thread with full message history |
 | `DELETE` | `/api/threads/:id` | Delete a thread |
 | `PATCH` | `/api/threads/:id` | Rename a thread |
+
+These paths are the defaults the client hooks call. They can be overridden per
+client via `endpoints` (see [Custom endpoints](#custom-endpoints)) — the server
+side is unchanged either way.
+
+### Custom endpoints
+
+Both `useEventStream` and `useThreads` accept an `endpoints` option to override
+the default paths. Useful when your backend mounts the chat surface under a
+different prefix, or your routing scheme doesn't match the canonical layout.
+Omit `endpoints` to fall back to defaults — no breaking change for existing
+consumers.
+
+```ts
+import { useEventStream, useThreads } from '@inharness-ai/agent-chat';
+
+useEventStream({
+  serverUrl: 'http://localhost:3001',
+  onEvent, onError,
+  endpoints: {
+    chat: '/v2/chat/start',                                      // POST start
+    abort: '/v2/chat/stop',                                      // POST { requestId }
+    streamByThread: (id) => `/v2/chat/live/${encodeURIComponent(id)}`, // GET join
+  },
+});
+
+useThreads({
+  serverUrl: 'http://localhost:3001',
+  onThreadLoaded,
+  endpoints: {
+    threads: '/v2/threads',
+    threadById: (id) => `/v2/threads/${encodeURIComponent(id)}`,
+  },
+});
+```
+
+`useAgentChat` forwards an outer `endpoints` object to both:
+
+```ts
+useAgentChat({
+  serverUrl: 'http://localhost:3001',
+  endpoints: {
+    stream: { chat: '/v2/chat/start', abort: '/v2/chat/stop' },
+    threads: { threads: '/v2/threads' },
+  },
+});
+```
 
 ### Chat Request Body
 

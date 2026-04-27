@@ -40,6 +40,13 @@ export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
       const { native, ...cleanMsg } = msg;
       return { type: 'assistant_message', message: cleanMsg } as unknown as WireEvent;
     }
+    case 'user_input_request': {
+      // Strip `native` (adapter-specific raw SDK request) — not JSON-safe and
+      // not useful client-side.
+      const req = event.request as Record<string, unknown>;
+      const { native, ...cleanReq } = req;
+      return { type: 'user_input_request', request: cleanReq } as unknown as WireEvent;
+    }
     default:
       return event as WireEvent;
   }

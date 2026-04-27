@@ -1,6 +1,7 @@
 import { useReducer, useCallback } from 'react';
 import type { ChatState, ChatMessage, UIContentBlock, SubagentState, UsageStats, TodoItem } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
+import type { UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
 
 // --- Actions ---
 
@@ -121,6 +122,9 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
     case 'connected':
       return state; // No state change needed
 
+    case 'turn_start':
+      return handleTurnStart(state, event);
+
     case 'text_delta':
       return handleTextDelta(state, event.text, event.isSubagent, event.subagentTaskId);
 
@@ -135,6 +139,12 @@ function handleEvent(state: ChatState, event: WireEvent): ChatState {
 
     case 'todo_list_updated':
       return handleTodoListUpdated(state, event);
+
+    case 'user_input_request':
+      return handleUserInputRequest(state, event.request);
+
+    case 'user_input_response':
+      return handleUserInputResponse(state, event.requestId, event.response);
 
     case 'assistant_message':
       return state; // We build from deltas, don't need to replace
@@ -489,6 +499,98 @@ function routeToolResultToSubagent(state: ChatState, toolUseId: string, summary:
 
 function handleSubagentTextDelta(state: ChatState, text: string, subagentTaskId?: string): ChatState {
   return routeStreamingBlockToSubagent(state, 'text', text, undefined, subagentTaskId);
+}
+
+function handleTurnStart(
+  state: ChatState,
+  event: { userMessageId: string; assistantMessageId: string; prompt: string; timestamp: string },
+): ChatState {
+  // If we already have this assistant turn active (normal POST path or duplicate
+  // replay on stream rejoin), don't duplicate.
+  if (state.activeAssistantMessageId === event.assistantMessageId) return state;
+  // If the user message is already present (local optimistic dispatch), just
+  // adopt the server-side assistant id and mark streaming.
+  if (state.messages.some(m => m.id === event.userMessageId)) {
+    return {
+      ...state,
+      activeAssistantMessageId: event.assistantMessageId,
+      isStreaming: true,
+      messages: state.messages.map(m =>
+        m.role === 'assistant' && m.id === state.activeAssistantMessageId && m.isStreaming
+          ? { ...m, id: event.assistantMessageId }
+          : m
+      ),
+    };
+  }
+  // Fresh join (e.g. F5 during an in-flight stream): synthesize both messages.
+  const userMsg: ChatMessage = {
+    id: event.userMessageId,
+    role: 'user',
+    blocks: [{ type: 'text', text: event.prompt, isStreaming: false }],
+    timestamp: event.timestamp,
+    isStreaming: false,
+  };
+  const assistantMsg: ChatMessage = {
+    id: event.assistantMessageId,
+    role: 'assistant',
+    blocks: [],
+    timestamp: event.timestamp,
+    isStreaming: true,
+  };
+  return {
+    ...state,
+    messages: [...state.messages, userMsg, assistantMsg],
+    activeAssistantMessageId: event.assistantMessageId,
+    isStreaming: true,
+    error: null,
+    usage: null,
+  };
+}
+
+function handleUserInputRequest(state: ChatState, request: UserInputRequest): ChatState {
+  return updateActiveMessage(state, (blocks) => {
+    // Finalize any streaming text/thinking blocks.
+    const finalized = blocks.map(b =>
+      (b.type === 'text' || b.type === 'thinking') && b.isStreaming
+        ? { ...b, isStreaming: false }
+        : b
+    );
+    return [...finalized, { type: 'userInputRequest' as const, requestId: request.requestId, request }];
+  });
+}
+
+function updateUserInputRequestBlocks(
+  blocks: UIContentBlock[],
+  requestId: string,
+  response: UserInputResponse,
+): { blocks: UIContentBlock[]; updated: boolean } {
+  let updated = false;
+  const next = blocks.map(b => {
+    if (b.type === 'userInputRequest' && b.requestId === requestId) {
+      updated = true;
+      return { ...b, response };
+    }
+    if (b.type === 'subagent') {
+      const nestedMessages = b.messages.map(msg => {
+        const res = updateUserInputRequestBlocks(msg.blocks, requestId, response);
+        if (res.updated) updated = true;
+        return res.updated ? { ...msg, blocks: res.blocks } : msg;
+      });
+      return { ...b, messages: nestedMessages };
+    }
+    return b;
+  });
+  return { blocks: next, updated };
+}
+
+function handleUserInputResponse(state: ChatState, requestId: string, response: UserInputResponse): ChatState {
+  return {
+    ...state,
+    messages: state.messages.map(msg => {
+      const res = updateUserInputRequestBlocks(msg.blocks, requestId, response);
+      return res.updated ? { ...msg, blocks: res.blocks } : msg;
+    }),
+  };
 }
 
 function handleResult(state: ChatState, event: { output: string; usage: UsageStats; sessionId?: string }): ChatState {

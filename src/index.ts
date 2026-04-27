@@ -15,6 +15,12 @@ export { TodoListBlock } from './components/TodoListBlock.js';
 export { CurrentTodoList } from './components/CurrentTodoList.js';
 export { ImageBlock } from './components/ImageBlock.js';
 export { SubagentPanel } from './components/SubagentPanel.js';
+export { UserInputRequestBlock } from './components/UserInputRequestBlock.js';
+export {
+  UserInputResponderProvider,
+  useUserInputResponder,
+} from './components/UserInputResponderContext.js';
+export type { UserInputResponder } from './components/UserInputResponderContext.js';
 export { ConfigBar } from './components/ConfigBar.js';
 export { AdvancedOptions } from './components/AdvancedOptions.js';
 export { ThreadList } from './components/ThreadList.js';
@@ -28,12 +34,28 @@ export { UsageDisplay } from './components/UsageDisplay.js';
 export { useAgentChat } from './hooks/useAgentChat.js';
 export { useMessageReducer, messageReducer, createInitialState } from './hooks/useMessageReducer.js';
 export { useEventStream } from './hooks/useEventStream.js';
+export type { StreamEndpoints } from './hooks/useEventStream.js';
 export { useAgentConfig } from './hooks/useAgentConfig.js';
 export { useThreads } from './hooks/useThreads.js';
+export type { ThreadsEndpoints } from './hooks/useThreads.js';
 
 // Utilities
 export { batchToolBlocks } from './utils/batchToolBlocks.js';
 export { toolCategory, groupingKey, categoryLabel } from './utils/toolCategory.js';
+
+// Tool renderers
+export {
+  claudeCodeToolRenderers,
+  prettyToolName,
+  parseToolResult,
+  clip,
+  kv,
+  mono,
+  ToolRendererProvider,
+  useToolRenderer,
+  ToolJsonModal,
+} from './tools/index.js';
+export type { ToolRenderer, ToolRendererRegistry } from './tools/index.js';
 
 // Types
 export type {
@@ -53,4 +75,6 @@ export type {
   WireEvent,
   ServerConfig,
   ThreadMeta,
+  UserInputRequest,
+  UserInputResponse,
 } from './server/protocol.js';

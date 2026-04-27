@@ -7,7 +7,8 @@ import type {
   StoredContentBlock,
 } from './server/protocol.js';
 import type { ToolCategory } from './utils/toolCategory.js';
-import type { TodoItem } from '@inharness-ai/agent-adapters';
+import type { TodoItem, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
+import type { ToolRendererRegistry } from './tools/types.js';
 
 // Re-export wire types for consumers
 export type { WireEvent, ServerConfig, ThreadMeta };
@@ -36,7 +37,8 @@ export type UIContentBlock =
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } | { type: 'url'; url: string } }
   | { type: 'subagent'; taskId: string; toolUseId: string; description: string; status: string; summary?: string; messages: ChatMessage[]; usage?: UsageStats }
   | { type: 'toolBatch'; category: ToolCategory; items: ToolBatchItem[] }
-  | { type: 'todoList'; items: TodoItem[] };
+  | { type: 'todoList'; items: TodoItem[] }
+  | { type: 'userInputRequest'; requestId: string; request: UserInputRequest; response?: UserInputResponse };
 
 // --- Chat Message ---
 
@@ -86,6 +88,16 @@ export interface ChatState {
 
 export interface AgentChatConfig {
   serverUrl: string;
+  /**
+   * Optional per-endpoint overrides for the chat-stream and threads HTTP
+   * surfaces. Both inner objects are forwarded to `useEventStream` and
+   * `useThreads` respectively. Defaults match the canonical paths served by
+   * `createChatHandler` from `@inharness-ai/agent-chat/server`.
+   */
+  endpoints?: {
+    stream?: import('./hooks/useEventStream.js').StreamEndpoints;
+    threads?: import('./hooks/useThreads.js').ThreadsEndpoints;
+  };
 }
 
 // --- Component Props ---
@@ -103,6 +115,12 @@ export interface AgentChatProps {
    * expandable summary block (e.g. "Edited 5 files"). Default: false.
    */
   batchTools?: boolean;
+  /**
+   * Override the per-tool renderer registry. Keys match `toolName` from the wire.
+   * Defaults to `claudeCodeToolRenderers`; merge with it to add custom tools:
+   *   `toolRenderers={{ ...claudeCodeToolRenderers, myTool: { summary: ... } }}`
+   */
+  toolRenderers?: ToolRendererRegistry;
 }
 
 // --- Conversion helpers ---
@@ -132,6 +150,13 @@ export function storedBlockToUI(block: StoredContentBlock): UIContentBlock {
       };
     case 'todoList':
       return { type: 'todoList', items: block.items };
+    case 'userInputRequest':
+      return {
+        type: 'userInputRequest',
+        requestId: block.requestId,
+        request: block.request,
+        response: block.response,
+      };
   }
 }
 
