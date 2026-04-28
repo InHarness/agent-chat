@@ -9,3 +9,4 @@ examples/basic/.env
 .gitignore
 .claude/skills/index.md
 buddy.yml
+threads/

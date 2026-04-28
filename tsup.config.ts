@@ -36,4 +36,16 @@ export default defineConfig([
     external: ['@inharness-ai/agent-adapters', 'express'],
     platform: 'node',
   },
+  // CLI bundle (npx @inharness-ai/agent-chat ...)
+  {
+    entry: { 'cli/index': 'src/cli/index.ts' },
+    format: ['esm'],
+    dts: false,
+    splitting: false,
+    outDir: 'dist',
+    external: ['@inharness-ai/agent-adapters', 'express', 'cors'],
+    platform: 'node',
+    target: 'node20',
+    banner: { js: '#!/usr/bin/env node' },
+  },
 ]);

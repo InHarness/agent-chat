@@ -14,13 +14,41 @@ Works with all agent architectures: Claude Code, Codex, OpenCode, Gemini.
 - **Themeable** — CSS custom properties, override with plain CSS, light + dark themes
 - **Node backend** — Express handlers that bridge HTTP/SSE to agent-adapters
 
+## Try it instantly (zero config)
+
+Run the bundled server + UI in any directory — no install, no setup:
+
+```bash
+ANTHROPIC_API_KEY=sk-... npx @inharness-ai/agent-chat basic
+```
+
+Then open the printed URL (defaults to `http://localhost:3001`). Threads are
+saved as JSON files under `./threads` in the current directory. A `.env` file
+in the current directory is loaded automatically (Node 20.6+).
+
+Pick the architecture (claude-code, gemini, codex, …) from the in-UI config
+bar — set the matching env var (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, …) for
+whichever you want to use.
+
+```bash
+# Common options
+npx @inharness-ai/agent-chat basic --port 4000
+npx @inharness-ai/agent-chat basic --threads-dir ./.chat-threads
+npx @inharness-ai/agent-chat basic --no-open    # don't auto-open browser
+```
+
+For embedding the components into your own app, follow the Quick Start below.
+
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-npm install @inharness-ai/agent-chat @inharness-ai/agent-adapters react react-dom express
+npm install @inharness-ai/agent-chat react react-dom
 ```
+
+`@inharness-ai/agent-adapters`, `express`, and `cors` are pulled in as
+dependencies; `react` / `react-dom` are peer-installed.
 
 ### 2. Server
 
@@ -434,7 +462,7 @@ Subagent-scoped events (`text_delta`, `thinking`, `tool_use`, `tool_result`, `to
 
 ### Prerequisites
 
-- Node.js >= 18
+- Node.js >= 20 (the `basic` CLI uses `process.loadEnvFile`, available in 20.6+)
 - The [`@inharness-ai/agent-adapters`](https://github.com/inharness/agent-adapters) repo cloned as a sibling directory (`../agent-adapters`)
 
 ### Setup
@@ -446,8 +474,9 @@ npm install
 ### Build
 
 ```bash
-npm run build        # one-off production build (tsup)
-npm run dev          # rebuild on file changes (tsup --watch)
+npm run build        # one-off production build (tsup + Vite for the CLI UI)
+npm run build:ui     # rebuild only the bundled CLI UI (Vite)
+npm run dev          # rebuild library on file changes (tsup --watch)
 ```
 
 ### Typecheck
@@ -493,6 +522,8 @@ src/
 ├── components/    # React UI components (<AgentChat />, <MessageList />, etc.)
 ├── hooks/         # React hooks (useAgentChat, useEventStream, etc.)
 ├── server/        # Express request handlers + session/thread management
+├── cli/           # `npx @inharness-ai/agent-chat basic` — bin entry, commands,
+│                  # and a self-contained Vite-built UI (src/cli/web/)
 ├── styles/        # CSS (variables, component styles)
 ├── utils/         # Tool-batching + tool-category helpers
 ├── types.ts       # Shared TypeScript types
