@@ -10,3 +10,4 @@ examples/basic/.env
 .claude/skills/index.md
 buddy.yml
 threads/
+.claude/skills/release-process/SKILL.md
