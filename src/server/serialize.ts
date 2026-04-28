@@ -28,10 +28,16 @@ export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
       };
     }
     case 'error': {
-      const err = event.error as Error;
+      const err = event.error as (Error & { cause?: unknown }) | undefined;
+      const baseMsg = err?.message ?? String(err);
+      const causeMsg =
+        err?.cause instanceof Error ? err.cause.message :
+        typeof err?.cause === 'string' ? err.cause : undefined;
+      const message =
+        causeMsg && !baseMsg.includes(causeMsg) ? `${baseMsg}: ${causeMsg}` : baseMsg;
       return {
         type: 'error',
-        error: err?.message ?? String(err),
+        error: message,
         code: errorToCode(err),
       };
     }
