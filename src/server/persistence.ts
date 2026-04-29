@@ -9,6 +9,10 @@ export interface PersistTurnArgs {
   assistantBlocks: StoredContentBlock[];
   resultUsage: WireUsageStats | undefined;
   resultSessionId: string | undefined;
+  /** Architecture used for this turn — stamped on user + assistant message. */
+  architecture: string;
+  /** Model alias used for this turn — stamped on user + assistant message. */
+  model: string;
 }
 
 export function persistTurn(args: PersistTurnArgs): void {
@@ -20,15 +24,25 @@ export function persistTurn(args: PersistTurnArgs): void {
     assistantBlocks,
     resultUsage,
     resultSessionId,
+    architecture,
+    model,
   } = args;
+
+  const stampedUser: StoredMessage = {
+    ...userMessage,
+    architecture,
+    model,
+  };
 
   const assistantMessage: StoredMessage = {
     id: assistantMessageId,
     role: 'assistant',
     blocks: assistantBlocks,
     timestamp: new Date().toISOString(),
+    architecture,
+    model,
     ...(resultUsage ? { usage: resultUsage } : {}),
   };
 
-  threads.appendMessages(threadId, [userMessage, assistantMessage], resultSessionId);
+  threads.appendMessages(threadId, [stampedUser, assistantMessage], resultSessionId);
 }

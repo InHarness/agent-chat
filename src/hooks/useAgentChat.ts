@@ -118,18 +118,17 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
   const setArchitecture = useCallback((arch: string) => {
     agentConfig.setArchitecture(arch);
     setReducerArchitecture(arch);
-    activeThreadIdRef.current = null;
-    threadHook.setActiveThreadId(null);
+    // Stay on the current thread. The server detects the architecture rollover
+    // and replays the transcript through the new adapter's prompt; messages
+    // remain visible in the UI.
     advanced.resetAdvancedOptions(arch);
-  }, [agentConfig, setReducerArchitecture, threadHook, advanced]);
+  }, [agentConfig, setReducerArchitecture, advanced]);
 
   const setModel = useCallback((mdl: string) => {
     agentConfig.setModel(mdl);
     setReducerModel(mdl);
-    activeThreadIdRef.current = null;
-    threadHook.setActiveThreadId(null);
-    advanced.resetAdvancedOptions();
-  }, [agentConfig, setReducerModel, threadHook, advanced]);
+    // Stay on the current thread; per-architecture options remain valid.
+  }, [agentConfig, setReducerModel]);
 
   const createThread = useCallback(async () => {
     clear();

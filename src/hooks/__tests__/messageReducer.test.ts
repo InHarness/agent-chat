@@ -446,20 +446,37 @@ describe('messageReducer — RESTORE / SET_ARCHITECTURE / SET_MODEL / CLEAR', ()
     expect(state.currentTodoItems).toEqual([{ id: 'n', content: 'nested', status: 'pending' }]);
   });
 
-  it('SET_ARCHITECTURE keeps model but clears messages', () => {
+  it('SET_ARCHITECTURE patches architecture and preserves messages, sessionId, usage', () => {
     let state = applyUserMessage(init(), 'hi');
+    state = applyEvents(state, goldenPathEvents);
+    const before = {
+      messages: state.messages,
+      sessionId: state.sessionId,
+      usage: state.usage,
+    };
     state = messageReducer(state, { type: 'SET_ARCHITECTURE', architecture: 'codex' });
     expect(state.architecture).toBe('codex');
     expect(state.model).toBe(MODEL);
-    expect(state.messages).toHaveLength(0);
+    // Conversation context survives the rollover — server replays it on the next turn.
+    expect(state.messages).toBe(before.messages);
+    expect(state.sessionId).toBe(before.sessionId);
+    expect(state.usage).toEqual(before.usage);
   });
 
-  it('SET_MODEL keeps architecture but clears messages', () => {
+  it('SET_MODEL patches model and preserves messages, sessionId, usage', () => {
     let state = applyUserMessage(init(), 'hi');
+    state = applyEvents(state, goldenPathEvents);
+    const before = {
+      messages: state.messages,
+      sessionId: state.sessionId,
+      usage: state.usage,
+    };
     state = messageReducer(state, { type: 'SET_MODEL', model: 'opus' });
     expect(state.model).toBe('opus');
     expect(state.architecture).toBe(ARCH);
-    expect(state.messages).toHaveLength(0);
+    expect(state.messages).toBe(before.messages);
+    expect(state.sessionId).toBe(before.sessionId);
+    expect(state.usage).toEqual(before.usage);
   });
 
   it('CLEAR resets state to initial', () => {

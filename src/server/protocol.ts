@@ -137,6 +137,15 @@ export interface StoredMessage {
   subagentTaskId?: string;
   /** Usage stats for this message's turn (mirrors NormalizedMessage.usage). */
   usage?: WireUsageStats;
+  /**
+   * Architecture this message was authored under. Set on persistence so the
+   * thread keeps a true audit trail across architecture rollovers; older
+   * threads written before this field existed read back as `undefined` (treat
+   * as "the thread's current architecture at load time").
+   */
+  architecture?: string;
+  /** Model alias this message was authored under (see `architecture`). */
+  model?: string;
 }
 
 export type StoredContentBlock =

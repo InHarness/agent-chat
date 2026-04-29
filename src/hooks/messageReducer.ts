@@ -96,15 +96,15 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
     }
 
     case 'SET_ARCHITECTURE':
-      return {
-        ...createInitialState(action.architecture, state.model),
-        model: state.model,
-      };
+      // Patch architecture in place; preserve messages, sessionId, usage,
+      // active streaming pointers. The server detects the rollover and replays
+      // the transcript when needed. sessionId stays around so adapters that
+      // tolerate it (claude-code on the same arch) keep cache; on the next
+      // turn the server may drop it via effectiveResumeSessionId.
+      return { ...state, architecture: action.architecture };
 
     case 'SET_MODEL':
-      return {
-        ...createInitialState(state.architecture, action.model),
-      };
+      return { ...state, model: action.model };
 
     case 'CLEAR':
       return createInitialState(state.architecture, state.model);

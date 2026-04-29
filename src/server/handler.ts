@@ -15,6 +15,7 @@ import { SessionManager } from './session-manager.js';
 import { ThreadStore } from './thread-store.js';
 import { persistTurn } from './persistence.js';
 import { applyEventToStoredBlocks } from './blockReducer.js';
+import { resolveExecutionPlan, isResumeFailureError, buildReplayPromptForFallback } from './executionPlan.js';
 import { defaultLogger, type Logger } from '../utils/logger.js';
 
 export interface ChatHandlerConfig {
@@ -162,9 +163,17 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     let resultSessionId: string | undefined;
     let resultUsage: WireUsageStats | undefined;
 
-    // Look up existing session for resumption
+    // Look up existing session for resumption and decide whether the next turn
+    // can resume it or needs a fresh session with the transcript replayed
+    // through the prompt. See executionPlan.ts for the rules.
     const existingThread = threads.get(threadId);
-    const sessionId = chatReq.sessionId ?? existingThread?.sessionId;
+    const plan = resolveExecutionPlan({
+      existingThread,
+      requestedArchitecture: architecture,
+      requestedModel: model,
+      requestedSessionId: chatReq.sessionId,
+      prompt: chatReq.prompt,
+    });
 
     // Resolve per-request options with thread → request → server fallbacks
     const effectiveCwd = existingThread?.cwd ?? (chatReq.cwd ? resolve(chatReq.cwd) : undefined) ?? config.cwd ?? process.cwd();
@@ -181,8 +190,15 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       if (chatReq.maxTurns !== undefined) updates.maxTurns = chatReq.maxTurns;
       if (chatReq.architectureConfig !== undefined) updates.architectureConfig = chatReq.architectureConfig;
       if (chatReq.planMode !== undefined) updates.planMode = chatReq.planMode;
+      if (plan.archChanged) updates.architecture = architecture;
+      if (plan.modelChanged) updates.model = model;
+      if (plan.requiresHistoryReplay) {
+        // Drop the stale sessionId now; the new adapter's `result.sessionId`
+        // will be persisted by persistTurn() at the end of this turn.
+        updates.sessionId = undefined;
+      }
       if (Object.keys(updates).length > 0) {
-        threads.update(threadId, updates as { systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown>; planMode?: boolean });
+        threads.update(threadId, updates as Parameters<typeof threads.update>[1]);
       }
     }
 
@@ -192,20 +208,21 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       });
     };
 
-    try {
-      const stream = adapter.execute({
-        prompt: chatReq.prompt,
-        systemPrompt: effectiveSystemPrompt,
-        model,
-        resumeSessionId: sessionId,
-        maxTurns: effectiveMaxTurns,
-        allowedTools: chatReq.allowedTools,
-        cwd: effectiveCwd,
-        architectureConfig: effectiveArchitectureConfig,
-        planMode: effectivePlanMode,
-        onUserInput,
-      });
+    const baseExecuteArgs = {
+      systemPrompt: effectiveSystemPrompt,
+      model,
+      maxTurns: effectiveMaxTurns,
+      allowedTools: chatReq.allowedTools,
+      cwd: effectiveCwd,
+      architectureConfig: effectiveArchitectureConfig,
+      planMode: effectivePlanMode,
+      onUserInput,
+    };
 
+    const consumeStream = async (
+      executeArgs: Parameters<RuntimeAdapter['execute']>[0],
+    ): Promise<void> => {
+      const stream = adapter.execute(executeArgs);
       for await (const event of stream) {
         config.onEvent?.(event, requestId);
 
@@ -219,6 +236,44 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
           resultSessionId = event.sessionId;
           resultUsage = event.usage;
           if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
+        }
+      }
+    };
+
+    try {
+      try {
+        await consumeStream({
+          ...baseExecuteArgs,
+          prompt: plan.prompt,
+          resumeSessionId: plan.resumeSessionId,
+        });
+      } catch (err) {
+        // Adapter resume failures (e.g. codex "no rollout found" — the CLI
+        // dropped the rollout for the sessionId we got back last turn) are
+        // recoverable: as long as nothing has streamed yet, drop the stale
+        // sessionId and replay the transcript through a fresh session.
+        if (
+          plan.resumeSessionId !== undefined &&
+          isResumeFailureError(err) &&
+          assistantBlocks.length === 0
+        ) {
+          logger.warn(
+            `handler.handleChat: adapter resume failed; retrying with fresh session and history replay`,
+            err,
+          );
+          threads.update(threadId, { sessionId: undefined });
+          const refreshed = threads.get(threadId);
+          const fallbackPrompt = buildReplayPromptForFallback(
+            refreshed?.messages ?? [],
+            chatReq.prompt,
+          );
+          await consumeStream({
+            ...baseExecuteArgs,
+            prompt: fallbackPrompt,
+            resumeSessionId: undefined,
+          });
+        } else {
+          throw err;
         }
       }
     } catch (err) {
@@ -250,6 +305,8 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         assistantBlocks,
         resultUsage,
         resultSessionId,
+        architecture,
+        model,
       });
     }
   };
