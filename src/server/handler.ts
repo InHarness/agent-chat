@@ -7,11 +7,15 @@ import type {
   ServerConfig,
   StoredMessage,
   StoredContentBlock,
+  WireUsageStats,
 } from './protocol.js';
 import { serializeSSE, unifiedEventToWire } from './serialize.js';
 import { validateChatRequest } from './validate.js';
 import { SessionManager } from './session-manager.js';
 import { ThreadStore } from './thread-store.js';
+import { persistTurn } from './persistence.js';
+import { applyEventToStoredBlocks } from './blockReducer.js';
+import { defaultLogger, type Logger } from '../utils/logger.js';
 
 export interface ChatHandlerConfig {
   architectures?: Record<string, ArchitectureConfig>;
@@ -21,6 +25,11 @@ export interface ChatHandlerConfig {
   threadsDir?: string;
   cwd?: string;
   onEvent?: (event: UnifiedEvent, requestId: string) => void;
+  /**
+   * Optional sink for non-fatal errors (corrupt thread files, JSON parse
+   * failures, etc.). Defaults to `console.warn` in development.
+   */
+  logger?: Logger;
 }
 
 export interface ChatHandler {
@@ -43,8 +52,9 @@ interface PendingUserInput {
 }
 
 export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
+  const logger = config.logger ?? defaultLogger;
   const sessions = new SessionManager();
-  const threads = new ThreadStore(config.threadsDir ?? './threads');
+  const threads = new ThreadStore(config.threadsDir ?? './threads', logger);
   const maxConcurrent = config.maxConcurrentRequests ?? 10;
   const architectures = config.architectures ?? buildDefaultArchitectures();
   const defaultArchitecture = config.defaultArchitecture ?? Object.keys(architectures)[0];
@@ -149,9 +159,8 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     });
 
     const assistantBlocks: StoredContentBlock[] = [];
-    const subagentMessages = new Map<string, StoredMessage[]>();
     let resultSessionId: string | undefined;
-    let resultUsage: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } | undefined;
+    let resultUsage: WireUsageStats | undefined;
 
     // Look up existing session for resumption
     const existingThread = threads.get(threadId);
@@ -204,12 +213,11 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         sessions.broadcast(threadId, wireEvent.type, wireEvent);
 
         // Collect blocks for persistence
-        collectBlock(event, assistantBlocks, subagentMessages);
+        applyEventToStoredBlocks(assistantBlocks, event);
 
         if (event.type === 'result') {
-          const resultEvent = event as { sessionId?: string; usage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } };
-          resultSessionId = resultEvent.sessionId;
-          resultUsage = resultEvent.usage;
+          resultSessionId = event.sessionId;
+          resultUsage = event.usage;
           if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
         }
       }
@@ -234,15 +242,15 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         }
       }
 
-      // Persist to thread
-      const assistantMessage: StoredMessage = {
-        id: assistantMessageId,
-        role: 'assistant',
-        blocks: assistantBlocks,
-        timestamp: new Date().toISOString(),
-        ...(resultUsage ? { usage: resultUsage } : {}),
-      };
-      threads.appendMessages(threadId!, [userMessage, assistantMessage], resultSessionId);
+      persistTurn({
+        threads,
+        threadId: threadId!,
+        userMessage,
+        assistantMessageId,
+        assistantBlocks,
+        resultUsage,
+        resultSessionId,
+      });
     }
   };
 
@@ -511,165 +519,3 @@ function buildDefaultArchitectures(): Record<string, ArchitectureConfig> {
   return result;
 }
 
-// --- Helpers for collecting blocks during streaming ---
-
-function findActiveSubagentBlock(blocks: StoredContentBlock[]): (StoredContentBlock & { type: 'subagent' }) | undefined {
-  // Find the most recently added running subagent block
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.type === 'subagent' && b.status === 'running') return b as StoredContentBlock & { type: 'subagent' };
-  }
-  return undefined;
-}
-
-function resolveSubagentBlock(
-  blocks: StoredContentBlock[],
-  subagentTaskId: string | undefined,
-): (StoredContentBlock & { type: 'subagent' }) | undefined {
-  if (subagentTaskId) {
-    const byId = blocks.find(b => b.type === 'subagent' && b.taskId === subagentTaskId) as
-      | (StoredContentBlock & { type: 'subagent' })
-      | undefined;
-    if (byId) return byId;
-  }
-  return findActiveSubagentBlock(blocks);
-}
-
-function appendToSubagentMessages(
-  sub: StoredContentBlock & { type: 'subagent' },
-  block: StoredContentBlock,
-  upsertLastIfType?: StoredContentBlock['type'],
-): void {
-  const lastMsg = sub.messages[sub.messages.length - 1];
-  if (lastMsg && lastMsg.role === 'assistant') {
-    if (upsertLastIfType) {
-      const lastBlock = lastMsg.blocks[lastMsg.blocks.length - 1];
-      if (lastBlock && lastBlock.type === upsertLastIfType) {
-        lastMsg.blocks[lastMsg.blocks.length - 1] = block;
-        return;
-      }
-    }
-    lastMsg.blocks.push(block);
-  } else {
-    sub.messages.push({
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      blocks: [block],
-      timestamp: new Date().toISOString(),
-      subagentTaskId: sub.taskId,
-    });
-  }
-}
-
-function collectBlock(
-  event: UnifiedEvent,
-  blocks: StoredContentBlock[],
-  _subagentMessages: Map<string, StoredMessage[]>,
-): void {
-  switch (event.type) {
-    case 'text_delta': {
-      const e = event as { text: string; isSubagent: boolean; subagentTaskId?: string };
-      if (e.isSubagent) {
-        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
-        if (!sub) return;
-        const lastMsg = sub.messages[sub.messages.length - 1];
-        const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
-        if (lastBlock && lastBlock.type === 'text') {
-          lastBlock.text += e.text;
-        } else {
-          appendToSubagentMessages(sub, { type: 'text', text: e.text });
-        }
-        return;
-      }
-      const last = blocks[blocks.length - 1];
-      if (last && last.type === 'text') {
-        last.text += e.text;
-      } else {
-        blocks.push({ type: 'text', text: e.text });
-      }
-      break;
-    }
-    case 'thinking': {
-      const e = event as { text: string; isSubagent: boolean; replace?: boolean; subagentTaskId?: string };
-      if (e.isSubagent) {
-        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
-        if (!sub) return;
-        const lastMsg = sub.messages[sub.messages.length - 1];
-        const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
-        if (!e.replace && lastBlock && lastBlock.type === 'thinking') {
-          lastBlock.text += e.text;
-        } else {
-          appendToSubagentMessages(sub, { type: 'thinking', text: e.text });
-        }
-        return;
-      }
-      const last = blocks[blocks.length - 1];
-      if (!e.replace && last && last.type === 'thinking') {
-        last.text += e.text;
-      } else {
-        blocks.push({ type: 'thinking', text: e.text });
-      }
-      break;
-    }
-    case 'tool_use': {
-      const e = event as { toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string };
-      if (e.isSubagent) {
-        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
-        if (sub) appendToSubagentMessages(sub, { type: 'toolUse', toolUseId: e.toolUseId, toolName: e.toolName, input: e.input });
-        return;
-      }
-      blocks.push({ type: 'toolUse', toolUseId: e.toolUseId, toolName: e.toolName, input: e.input });
-      break;
-    }
-    case 'tool_result': {
-      const e = event as unknown as { toolUseId: string; summary: string; isSubagent: boolean; subagentTaskId?: string };
-      if (e.isSubagent) {
-        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
-        if (sub) appendToSubagentMessages(sub, { type: 'toolResult', toolUseId: e.toolUseId, content: e.summary });
-        return;
-      }
-      blocks.push({ type: 'toolResult', toolUseId: e.toolUseId, content: e.summary });
-      break;
-    }
-    case 'subagent_started': {
-      const e = event as { taskId: string; description: string; toolUseId: string };
-      blocks.push({ type: 'subagent', taskId: e.taskId, toolUseId: e.toolUseId ?? '', description: e.description, status: 'running', messages: [] });
-      break;
-    }
-    case 'subagent_completed': {
-      const e = event as { taskId: string; status: string; summary?: string; usage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number } };
-      const sub = blocks.find(b => b.type === 'subagent' && b.taskId === e.taskId) as StoredContentBlock & { type: 'subagent' } | undefined;
-      if (sub) {
-        sub.status = e.status;
-        sub.summary = e.summary;
-        if (e.usage) sub.usage = e.usage;
-      }
-      break;
-    }
-    case 'todo_list_updated': {
-      const e = event as { items: import('@inharness-ai/agent-adapters').TodoItem[]; isSubagent: boolean; subagentTaskId?: string };
-      if (e.isSubagent) {
-        const sub = resolveSubagentBlock(blocks, e.subagentTaskId);
-        if (sub) appendToSubagentMessages(sub, { type: 'todoList', items: e.items }, 'todoList');
-        return;
-      }
-      const last = blocks[blocks.length - 1];
-      if (last && last.type === 'todoList') {
-        last.items = e.items;
-      } else {
-        blocks.push({ type: 'todoList', items: e.items });
-      }
-      break;
-    }
-    case 'user_input_request': {
-      const e = event as { request: UserInputRequest };
-      const { native, ...cleanReq } = e.request as unknown as Record<string, unknown>;
-      blocks.push({
-        type: 'userInputRequest',
-        requestId: e.request.requestId,
-        request: cleanReq as unknown as UserInputRequest,
-      });
-      break;
-    }
-  }
-}

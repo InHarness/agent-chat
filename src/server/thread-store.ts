@@ -1,12 +1,15 @@
 import { readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { StoredThread, ThreadMeta, StoredMessage } from './protocol.js';
+import { defaultLogger, type Logger } from '../utils/logger.js';
 
 export class ThreadStore {
   private dir: string;
+  private logger: Logger;
 
-  constructor(dir: string) {
+  constructor(dir: string, logger: Logger = defaultLogger) {
     this.dir = dir;
+    this.logger = logger;
     mkdirSync(dir, { recursive: true });
   }
 
@@ -26,8 +29,8 @@ export class ThreadStore {
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         });
-      } catch {
-        // Skip corrupt files
+      } catch (err) {
+        this.logger.warn(`ThreadStore.list: skipping corrupt file ${file}`, err);
       }
     }
 
@@ -39,7 +42,8 @@ export class ThreadStore {
     if (!existsSync(path)) return null;
     try {
       return JSON.parse(readFileSync(path, 'utf-8')) as StoredThread;
-    } catch {
+    } catch (err) {
+      this.logger.warn(`ThreadStore.get: corrupt thread ${id}`, err);
       return null;
     }
   }

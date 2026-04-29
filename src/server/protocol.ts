@@ -52,6 +52,34 @@ export type WireEvent =
 // Re-export user input types so consumers don't need a separate import.
 export type { UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
 
+// --- Type guards ---
+// Useful for narrowing events parsed from SSE streams (JSON.parse returns
+// `unknown` / a loosely-typed shape) and for branchy reducers where the
+// surrounding switch isn't readily available.
+
+export type WireEventOfType<T extends WireEvent['type']> = Extract<WireEvent, { type: T }>;
+
+const guard = <T extends WireEvent['type']>(type: T) =>
+  (event: WireEvent): event is WireEventOfType<T> => event.type === type;
+
+export const isConnectedEvent = guard('connected');
+export const isTurnStartEvent = guard('turn_start');
+export const isTextDeltaEvent = guard('text_delta');
+export const isThinkingEvent = guard('thinking');
+export const isToolUseEvent = guard('tool_use');
+export const isToolResultEvent = guard('tool_result');
+export const isTodoListUpdatedEvent = guard('todo_list_updated');
+export const isAssistantMessageEvent = guard('assistant_message');
+export const isSubagentStartedEvent = guard('subagent_started');
+export const isSubagentProgressEvent = guard('subagent_progress');
+export const isSubagentCompletedEvent = guard('subagent_completed');
+export const isUserInputRequestEvent = guard('user_input_request');
+export const isUserInputResponseEvent = guard('user_input_response');
+export const isResultEvent = guard('result');
+export const isErrorEvent = guard('error');
+export const isFlushEvent = guard('flush');
+export const isDoneEvent = guard('done');
+
 // --- Chat Request ---
 
 export interface ChatRequest {

@@ -1,0 +1,67 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`applyEventToStoredBlocks — golden path snapshot > produces stable block list for the golden-path turn fixture 1`] = `
+[
+  {
+    "text": "Hello world!",
+    "type": "text",
+  },
+  {
+    "input": {
+      "path": "/x",
+    },
+    "toolName": "Read",
+    "toolUseId": "t1",
+    "type": "toolUse",
+  },
+  {
+    "content": "ok",
+    "toolUseId": "t1",
+    "type": "toolResult",
+  },
+]
+`;
+
+exports[`applyEventToStoredBlocks — subagent lifecycle snapshot > produces stable nested-message tree for the subagent lifecycle fixture 1`] = `
+[
+  {
+    "description": "doing it",
+    "messages": [
+      {
+        "blocks": [
+          {
+            "text": "sub thought",
+            "type": "text",
+          },
+          {
+            "input": {
+              "q": "x",
+            },
+            "toolName": "Grep",
+            "toolUseId": "t-sub-1",
+            "type": "toolUse",
+          },
+          {
+            "content": "sub ok",
+            "toolUseId": "t-sub-1",
+            "type": "toolResult",
+          },
+        ],
+        "id": "uuid-1",
+        "role": "assistant",
+        "subagentTaskId": "sub-1",
+        "timestamp": "2026-04-28T00:00:00.000Z",
+      },
+    ],
+    "status": "completed",
+    "summary": "sub done",
+    "taskId": "sub-1",
+    "toolUseId": "tu-sub1",
+    "type": "subagent",
+    "usage": {
+      "inputTokens": 5,
+      "outputTokens": 7,
+    },
+  },
+]
+`;

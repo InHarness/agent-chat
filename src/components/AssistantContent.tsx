@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import type { UIContentBlock } from '../types.js';
-import type { UserInputResponse } from '@inharness-ai/agent-adapters';
 import { TextBlock } from './TextBlock.js';
 import { ThinkingBlock } from './ThinkingBlock.js';
 import { ToolUseBlock } from './ToolUseBlock.js';
@@ -12,6 +11,7 @@ import { SubagentPanel } from './SubagentPanel.js';
 import { UserInputRequestBlock } from './UserInputRequestBlock.js';
 import { useUserInputResponder } from './UserInputResponderContext.js';
 import { batchToolBlocks } from '../utils/batchToolBlocks.js';
+import { pairToolBlocks } from '../utils/pairToolBlocks.js';
 
 interface AssistantContentProps {
   blocks: UIContentBlock[];
@@ -25,27 +25,10 @@ export function AssistantContent({ blocks, batchTools }: AssistantContentProps) 
     [blocks, batchTools],
   );
 
-  // Build maps for pairing toolUse ↔ toolResult ↔ subagent by toolUseId
-  const resultByToolUseId = new Map<string, { content: string; isError: boolean; collapsed: boolean }>();
-  const subagentByToolUseId = new Map<string, UIContentBlock & { type: 'subagent' }>();
-  const pairedToolUseIds = new Set<string>();
-
-  for (const block of renderBlocks) {
-    if (block.type === 'toolResult') {
-      resultByToolUseId.set(block.toolUseId, { content: block.content, isError: block.isError, collapsed: block.collapsed });
-    }
-    if (block.type === 'subagent' && block.toolUseId) {
-      subagentByToolUseId.set(block.toolUseId, block);
-    }
-  }
-
-  // Mark which toolUseIds have a matching toolUse block (for skipping standalone renders)
-  for (const block of renderBlocks) {
-    if (block.type === 'toolUse') {
-      if (resultByToolUseId.has(block.toolUseId)) pairedToolUseIds.add(block.toolUseId);
-      if (subagentByToolUseId.has(block.toolUseId)) pairedToolUseIds.add(block.toolUseId);
-    }
-  }
+  const { resultByToolUseId, subagentByToolUseId, pairedToolUseIds } = useMemo(
+    () => pairToolBlocks(renderBlocks),
+    [renderBlocks],
+  );
 
   return (
     <div data-ac="assistant-content">

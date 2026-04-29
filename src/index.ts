@@ -42,6 +42,10 @@ export type { ThreadsEndpoints } from './hooks/useThreads.js';
 // Utilities
 export { batchToolBlocks } from './utils/batchToolBlocks.js';
 export { toolCategory, groupingKey, categoryLabel } from './utils/toolCategory.js';
+export { pairToolBlocks } from './utils/pairToolBlocks.js';
+export type { ToolPairing } from './utils/pairToolBlocks.js';
+export { createLogger, defaultLogger } from './utils/logger.js';
+export type { Logger, LoggerOptions } from './utils/logger.js';
 
 // Tool renderers
 export {

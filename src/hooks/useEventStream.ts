@@ -1,5 +1,6 @@
 import { useRef, useCallback, useMemo } from 'react';
 import type { WireEvent, ChatRequest } from '../server/protocol.js';
+import { defaultLogger, type Logger } from '../utils/logger.js';
 
 /**
  * Per-endpoint overrides for the chat-stream HTTP surface. Each field is optional
@@ -22,6 +23,7 @@ interface StreamOptions {
   onError: (error: Error) => void;
   onConnected?: (requestId: string, threadId: string) => void;
   endpoints?: StreamEndpoints;
+  logger?: Logger;
 }
 
 const defaultStreamByThread = (threadId: string) =>
@@ -67,6 +69,7 @@ export function useEventStream(options: StreamOptions) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef<string | null>(null);
   const joinAbortRef = useRef<AbortController | null>(null);
+  const logger = options.logger ?? defaultLogger;
 
   const { chatPath, abortPath, streamByThread } = useMemo(() => ({
     chatPath: options.endpoints?.chat ?? '/api/chat',
@@ -106,8 +109,8 @@ export function useEventStream(options: StreamOptions) {
           } else {
             options.onEvent({ type: event, ...parsed } as WireEvent);
           }
-        } catch {
-          // Skip malformed events
+        } catch (err) {
+          logger.warn('useEventStream.startStream.parse', err);
         }
       });
     } catch (err) {
@@ -119,7 +122,7 @@ export function useEventStream(options: StreamOptions) {
         requestIdRef.current = null;
       }
     }
-  }, [options.serverUrl, options.onEvent, options.onError, options.onConnected, chatPath]);
+  }, [options.serverUrl, options.onEvent, options.onError, options.onConnected, chatPath, logger]);
 
   /**
    * Try to join an in-flight stream for the given thread. Returns `true` when
@@ -156,8 +159,8 @@ export function useEventStream(options: StreamOptions) {
           } else {
             options.onEvent({ type: event, ...parsed } as WireEvent);
           }
-        } catch {
-          // Skip malformed
+        } catch (err) {
+          logger.warn('useEventStream.joinStream.parse', err);
         }
       });
       return true;
@@ -170,7 +173,7 @@ export function useEventStream(options: StreamOptions) {
         joinAbortRef.current = null;
       }
     }
-  }, [options.serverUrl, options.onEvent, options.onError, options.onConnected, streamByThread]);
+  }, [options.serverUrl, options.onEvent, options.onError, options.onConnected, streamByThread, logger]);
 
   /**
    * Stop the current turn: close the local SSE connection AND tell the server
@@ -192,11 +195,11 @@ export function useEventStream(options: StreamOptions) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ requestId }),
         });
-      } catch {
-        // Best-effort abort
+      } catch (err) {
+        logger.warn('useEventStream.abort', err);
       }
     }
-  }, [options.serverUrl, abortPath]);
+  }, [options.serverUrl, abortPath, logger]);
 
   /**
    * Close the local SSE connection without telling the server to stop. The

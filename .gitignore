@@ -11,3 +11,4 @@ examples/basic/.env
 buddy.yml
 threads/
 .claude/skills/release-process/SKILL.md
+coverage/

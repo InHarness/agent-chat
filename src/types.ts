@@ -5,15 +5,18 @@ import type {
   ServerConfig,
   ThreadMeta,
   StoredContentBlock,
+  WireUsageStats,
 } from './server/protocol.js';
 import type { ToolCategory } from './utils/toolCategory.js';
 import type { TodoItem, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
 import type { ToolRendererRegistry } from './tools/types.js';
+import type { Logger } from './utils/logger.js';
 
 // Re-export wire types for consumers
 export type { WireEvent, ServerConfig, ThreadMeta };
 export type { ArchOption, ArchOptionType } from '@inharness-ai/agent-adapters';
 export type { ToolCategory } from './utils/toolCategory.js';
+export type { Logger } from './utils/logger.js';
 /**
  * TODO list item. `activeForm` is populated by claude-code for `in_progress`
  * items (present-continuous label); `priority` is populated by opencode only.
@@ -63,12 +66,7 @@ export interface SubagentState {
   summary?: string;
 }
 
-export interface UsageStats {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadInputTokens?: number;
-  cacheCreationInputTokens?: number;
-}
+export type UsageStats = WireUsageStats;
 
 export interface ChatState {
   messages: ChatMessage[];
@@ -98,6 +96,13 @@ export interface AgentChatConfig {
     stream?: import('./hooks/useEventStream.js').StreamEndpoints;
     threads?: import('./hooks/useThreads.js').ThreadsEndpoints;
   };
+  /**
+   * Optional sink for non-fatal errors that the library would otherwise
+   * silently swallow (background fetch failures, malformed SSE events,
+   * etc.). When omitted, the library logs to `console.warn` in development
+   * and stays silent in production.
+   */
+  logger?: Logger;
 }
 
 // --- Component Props ---

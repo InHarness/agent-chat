@@ -1,7 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { ThreadMeta, StoredThread } from '../server/protocol.js';
-import type { ChatMessage } from '../types.js';
-import { storedMessageToChat } from '../types.js';
+import { defaultLogger, type Logger } from '../utils/logger.js';
 
 /**
  * Per-endpoint overrides for the threads HTTP surface. Each field is optional
@@ -18,24 +17,14 @@ export interface ThreadsEndpoints {
 
 interface UseThreadsOptions {
   serverUrl: string;
-  onThreadLoaded: (
-    messages: ChatMessage[],
-    sessionId?: string,
-    architecture?: string,
-    model?: string,
-    cwd?: string,
-    systemPrompt?: string,
-    maxTurns?: number,
-    architectureConfig?: Record<string, unknown>,
-    planMode?: boolean,
-  ) => void;
   endpoints?: ThreadsEndpoints;
+  logger?: Logger;
 }
 
 const defaultThreadById = (threadId: string) =>
   `/api/threads/${encodeURIComponent(threadId)}`;
 
-export function useThreads({ serverUrl, onThreadLoaded, endpoints }: UseThreadsOptions) {
+export function useThreads({ serverUrl, endpoints, logger = defaultLogger }: UseThreadsOptions) {
   const [threads, setThreads] = useState<ThreadMeta[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -51,37 +40,26 @@ export function useThreads({ serverUrl, onThreadLoaded, endpoints }: UseThreadsO
       if (res.ok) {
         setThreads(await res.json());
       }
-    } catch {
-      // Silent fail for thread list
+    } catch (err) {
+      logger.warn('useThreads.refresh', err);
     }
-  }, [serverUrl, threadsPath]);
+  }, [serverUrl, threadsPath, logger]);
 
-  const loadThread = useCallback(async (threadId: string) => {
+  const loadThread = useCallback(async (threadId: string): Promise<StoredThread | null> => {
     setLoading(true);
     try {
       const res = await fetch(`${serverUrl}${threadById(threadId)}`);
       if (!res.ok) throw new Error('Thread not found');
       const thread: StoredThread = await res.json();
-
       setActiveThreadId(threadId);
-      const messages = thread.messages.map(storedMessageToChat);
-      onThreadLoaded(
-        messages,
-        thread.sessionId,
-        thread.architecture,
-        thread.model,
-        thread.cwd,
-        thread.systemPrompt,
-        thread.maxTurns,
-        thread.architectureConfig,
-        thread.planMode,
-      );
-    } catch {
-      // Thread load failed
+      return thread;
+    } catch (err) {
+      logger.warn('useThreads.load', err);
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [serverUrl, onThreadLoaded, threadById]);
+  }, [serverUrl, threadById, logger]);
 
   const createThread = useCallback(async (architecture: string, model: string, opts?: { cwd?: string; systemPrompt?: string; maxTurns?: number; architectureConfig?: Record<string, unknown>; planMode?: boolean }): Promise<string | null> => {
     try {
@@ -95,23 +73,26 @@ export function useThreads({ serverUrl, onThreadLoaded, endpoints }: UseThreadsO
       setActiveThreadId(thread.id);
       await refreshThreads();
       return thread.id;
-    } catch {
+    } catch (err) {
+      logger.warn('useThreads.create', err);
       return null;
     }
-  }, [serverUrl, refreshThreads, threadsPath]);
+  }, [serverUrl, refreshThreads, threadsPath, logger]);
 
-  const deleteThread = useCallback(async (threadId: string) => {
+  const deleteThread = useCallback(async (threadId: string): Promise<{ deletedActive: boolean }> => {
+    let deletedActive = false;
     try {
       await fetch(`${serverUrl}${threadById(threadId)}`, { method: 'DELETE' });
       if (activeThreadId === threadId) {
         setActiveThreadId(null);
-        onThreadLoaded([]); // Clear messages
+        deletedActive = true;
       }
       await refreshThreads();
-    } catch {
-      // Silent fail
+    } catch (err) {
+      logger.warn('useThreads.delete', err);
     }
-  }, [serverUrl, activeThreadId, onThreadLoaded, refreshThreads, threadById]);
+    return { deletedActive };
+  }, [serverUrl, activeThreadId, refreshThreads, threadById, logger]);
 
   const renameThread = useCallback(async (threadId: string, title: string) => {
     try {
@@ -121,10 +102,10 @@ export function useThreads({ serverUrl, onThreadLoaded, endpoints }: UseThreadsO
         body: JSON.stringify({ title }),
       });
       await refreshThreads();
-    } catch {
-      // Silent fail
+    } catch (err) {
+      logger.warn('useThreads.rename', err);
     }
-  }, [serverUrl, refreshThreads, threadById]);
+  }, [serverUrl, refreshThreads, threadById, logger]);
 
   return {
     threads,

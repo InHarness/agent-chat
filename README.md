@@ -312,6 +312,7 @@ interface ChatHandlerConfig {
   threadsDir?: string;             // default: './threads'
   cwd?: string;                    // working directory for agents
   onEvent?: (event, requestId) => void;  // event hook for logging
+  logger?: Logger;                 // sink for non-fatal errors; defaults to console.warn in dev
 }
 ```
 

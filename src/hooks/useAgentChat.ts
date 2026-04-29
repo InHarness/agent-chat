@@ -1,22 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ArchOption, UserInputResponse } from '@inharness-ai/agent-adapters';
-import type { AgentChatConfig, ChatMessage } from '../types.js';
+import { useCallback, useEffect, useRef } from 'react';
+import type { ArchOption } from '@inharness-ai/agent-adapters';
+import type { AgentChatConfig } from '../types.js';
+import { storedMessageToChat } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
 import { useMessageReducer } from './useMessageReducer.js';
 import { useEventStream } from './useEventStream.js';
 import { useAgentConfig } from './useAgentConfig.js';
 import { useThreads } from './useThreads.js';
-
-function buildArchDefaults(options: ArchOption[]): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const opt of options) {
-    if (opt.default !== undefined) result[opt.key] = opt.default;
-  }
-  return result;
-}
+import { useAdvancedOptions } from './useAdvancedOptions.js';
+import { useChatActions } from './useChatActions.js';
 
 export function useAgentChat(chatConfig: AgentChatConfig) {
-  const { serverUrl, endpoints } = chatConfig;
+  const { serverUrl, endpoints, logger } = chatConfig;
 
   // Config (architectures + models from server)
   const agentConfig = useAgentConfig(serverUrl);
@@ -32,65 +27,28 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     clear,
   } = useMessageReducer(agentConfig.architecture, agentConfig.model);
 
-  // Advanced options state
-  const [cwd, setCwd] = useState('');
-  const [activeCwd, setActiveCwd] = useState<string | null>(null);
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [maxTurns, setMaxTurns] = useState<number | undefined>(undefined);
-  const [architectureConfig, setArchitectureConfig] = useState<Record<string, unknown>>({});
-  const [planMode, setPlanMode] = useState(false);
-
-  // Track the latest threadId from the server (set on 'connected' event)
-  const activeThreadIdRef = useRef<string | null>(null);
-
   // Threads
-  const threadCallbackRef = useRef<(
-    messages: ChatMessage[],
-    sessionId?: string,
-    arch?: string,
-    model?: string,
-    cwd?: string,
-    systemPrompt?: string,
-    maxTurns?: number,
-    architectureConfig?: Record<string, unknown>,
-    planMode?: boolean,
-  ) => void>(null);
-  threadCallbackRef.current = (messages, sessionId, arch, model, threadCwd, threadSystemPrompt, threadMaxTurns, threadArchConfig, threadPlanMode) => {
-    restoreMessages(messages, sessionId, arch, model);
-    if (arch) agentConfig.setArchitecture(arch);
-    if (model) agentConfig.setModel(model);
-    setActiveCwd(threadCwd ?? null);
-    setSystemPrompt(threadSystemPrompt ?? '');
-    setMaxTurns(threadMaxTurns);
-    setArchitectureConfig(threadArchConfig ?? {});
-    setPlanMode(threadPlanMode ?? false);
-  };
-
   const threadHook = useThreads({
     serverUrl,
     endpoints: endpoints?.threads,
-    onThreadLoaded: useCallback(
-      (
-        messages: ChatMessage[],
-        sessionId?: string,
-        arch?: string,
-        model?: string,
-        cwd?: string,
-        systemPrompt?: string,
-        maxTurns?: number,
-        architectureConfig?: Record<string, unknown>,
-        planMode?: boolean,
-      ) => {
-        threadCallbackRef.current?.(messages, sessionId, arch, model, cwd, systemPrompt, maxTurns, architectureConfig, planMode);
-      },
-      [],
-    ),
+    logger,
   });
 
-  // Load threads on mount
-  useEffect(() => {
-    threadHook.refreshThreads();
-  }, [threadHook.refreshThreads]);
+  // Architecture options lookup (stable across renders that don't change config).
+  const getArchOptions = useCallback((arch: string): ArchOption[] => {
+    return agentConfig.config?.architectures[arch]?.options ?? [];
+  }, [agentConfig.config]);
+
+  // Advanced options (cwd, systemPrompt, maxTurns, architectureConfig, planMode)
+  const advanced = useAdvancedOptions({
+    architecture: agentConfig.architecture,
+    configReady: !!agentConfig.config,
+    activeThreadId: threadHook.activeThreadId,
+    getArchOptions,
+  });
+
+  // Track the latest threadId from the server (set on 'connected' event)
+  const activeThreadIdRef = useRef<string | null>(null);
 
   // Event handlers (stable refs)
   const stateRef = useRef(state);
@@ -104,7 +62,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     handleWireEvent({ type: 'error', error: error.message, code: 'NETWORK_ERROR' });
   }, [handleWireEvent]);
 
-  const onConnected = useCallback((requestId: string, threadId: string) => {
+  const onConnected = useCallback((_requestId: string, threadId: string) => {
     activeThreadIdRef.current = threadId;
     threadHook.setActiveThreadId(threadId);
   }, [threadHook]);
@@ -113,127 +71,110 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
   const { startStream, joinStream, abort: abortStream } = useEventStream({
     serverUrl,
     endpoints: endpoints?.stream,
+    logger,
     onEvent,
     onError,
     onConnected,
   });
 
-  // --- Public API ---
-
-  const sendMessage = useCallback(async (text: string) => {
-    if (stateRef.current.isStreaming) return;
-    if (!text.trim()) return;
-
-    sendUserMessage(text);
-
-    await startStream({
-      prompt: text,
-      threadId: threadHook.activeThreadId ?? undefined,
-      architecture: agentConfig.architecture,
-      model: agentConfig.model,
-      sessionId: stateRef.current.sessionId ?? undefined,
-      cwd: threadHook.activeThreadId ? undefined : cwd || undefined,
-      systemPrompt: systemPrompt || undefined,
-      maxTurns,
-      architectureConfig: Object.keys(architectureConfig).length > 0 ? architectureConfig : undefined,
-      planMode: planMode || undefined,
-    });
-
-    // Refresh thread list after response
+  // Load threads on mount
+  useEffect(() => {
     threadHook.refreshThreads();
-  }, [sendUserMessage, startStream, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig, planMode]);
+  }, [threadHook.refreshThreads]);
 
-  const abort = useCallback(() => {
-    abortStream();
-    handleWireEvent({ type: 'error', error: 'Request aborted', code: 'ABORTED' });
-  }, [abortStream, handleWireEvent]);
+  // Snapshot getter for chat actions (avoids passing 8 separate dependencies).
+  const getRequest = useCallback(() => ({
+    activeThreadId: threadHook.activeThreadId,
+    architecture: agentConfig.architecture,
+    model: agentConfig.model,
+    cwd: advanced.cwd,
+    systemPrompt: advanced.systemPrompt,
+    maxTurns: advanced.maxTurns,
+    architectureConfig: advanced.architectureConfig,
+    planMode: advanced.planMode,
+  }), [
+    threadHook.activeThreadId,
+    agentConfig.architecture,
+    agentConfig.model,
+    advanced.cwd,
+    advanced.systemPrompt,
+    advanced.maxTurns,
+    advanced.architectureConfig,
+    advanced.planMode,
+  ]);
 
-  const sendUserInputResponse = useCallback(async (requestId: string, response: UserInputResponse) => {
-    // Optimistic local update so the card reflects the answer instantly.
-    handleWireEvent({ type: 'user_input_response', requestId, response });
-    try {
-      const res = await fetch(`${serverUrl}/api/chat/user-input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, response }),
-      });
-      if (!res.ok) {
-        const err = await res.text().catch(() => '');
-        throw new Error(err || `user-input failed: ${res.status}`);
-      }
-    } catch (e) {
-      handleWireEvent({
-        type: 'error',
-        error: (e as Error).message ?? 'Failed to submit user input',
-        code: 'USER_INPUT_ERROR',
-      });
-    }
-  }, [serverUrl, handleWireEvent]);
-
-  const resetAdvancedOptions = useCallback((archOverride?: string) => {
-    setCwd('');
-    setActiveCwd(null);
-    setSystemPrompt('');
-    setMaxTurns(undefined);
-    setPlanMode(false);
-    const arch = archOverride ?? agentConfig.architecture;
-    const options = agentConfig.config?.architectures[arch]?.options ?? [];
-    setArchitectureConfig(buildArchDefaults(options));
-  }, [agentConfig.config, agentConfig.architecture]);
+  // Actions (sendMessage, abort, sendUserInputResponse)
+  const { sendMessage, abort, sendUserInputResponse } = useChatActions({
+    serverUrl,
+    stateRef,
+    sendUserMessage,
+    handleWireEvent,
+    startStream,
+    abortStream,
+    refreshThreads: threadHook.refreshThreads,
+    getRequest,
+  });
 
   const setArchitecture = useCallback((arch: string) => {
     agentConfig.setArchitecture(arch);
     setReducerArchitecture(arch);
     activeThreadIdRef.current = null;
     threadHook.setActiveThreadId(null);
-    resetAdvancedOptions(arch);
-  }, [agentConfig, setReducerArchitecture, threadHook, resetAdvancedOptions]);
+    advanced.resetAdvancedOptions(arch);
+  }, [agentConfig, setReducerArchitecture, threadHook, advanced]);
 
   const setModel = useCallback((mdl: string) => {
     agentConfig.setModel(mdl);
     setReducerModel(mdl);
     activeThreadIdRef.current = null;
     threadHook.setActiveThreadId(null);
-    resetAdvancedOptions();
-  }, [agentConfig, setReducerModel, threadHook, resetAdvancedOptions]);
-
-  // Seed architecture-specific defaults on initial config load (when no thread active).
-  const seededInitialRef = useRef(false);
-  useEffect(() => {
-    if (seededInitialRef.current) return;
-    if (!agentConfig.config || !agentConfig.architecture) return;
-    if (threadHook.activeThreadId) return;
-    seededInitialRef.current = true;
-    const options = agentConfig.config.architectures[agentConfig.architecture]?.options ?? [];
-    setArchitectureConfig(buildArchDefaults(options));
-  }, [agentConfig.config, agentConfig.architecture, threadHook.activeThreadId]);
+    advanced.resetAdvancedOptions();
+  }, [agentConfig, setReducerModel, threadHook, advanced]);
 
   const createThread = useCallback(async () => {
     clear();
-    resetAdvancedOptions();
+    advanced.resetAdvancedOptions();
     const id = await threadHook.createThread(agentConfig.architecture, agentConfig.model, {
-      cwd: cwd || undefined,
-      systemPrompt: systemPrompt || undefined,
-      maxTurns,
-      architectureConfig: Object.keys(architectureConfig).length > 0 ? architectureConfig : undefined,
-      planMode: planMode || undefined,
+      cwd: advanced.cwd || undefined,
+      systemPrompt: advanced.systemPrompt || undefined,
+      maxTurns: advanced.maxTurns,
+      architectureConfig: Object.keys(advanced.architectureConfig).length > 0 ? advanced.architectureConfig : undefined,
+      planMode: advanced.planMode || undefined,
     });
     if (id) activeThreadIdRef.current = id;
-  }, [clear, resetAdvancedOptions, threadHook, agentConfig.architecture, agentConfig.model, cwd, systemPrompt, maxTurns, architectureConfig, planMode]);
+  }, [clear, advanced, threadHook, agentConfig.architecture, agentConfig.model]);
 
   const loadThread = useCallback(async (threadId: string) => {
-    // Load static history first so the UI paints immediately.
-    await threadHook.loadThread(threadId);
+    const thread = await threadHook.loadThread(threadId);
+    if (thread) {
+      const messages = thread.messages.map(storedMessageToChat);
+      restoreMessages(messages, thread.sessionId, thread.architecture, thread.model);
+      if (thread.architecture) agentConfig.setArchitecture(thread.architecture);
+      if (thread.model) agentConfig.setModel(thread.model);
+      advanced.setActiveCwd(thread.cwd ?? null);
+      advanced.setSystemPrompt(thread.systemPrompt ?? '');
+      advanced.setMaxTurns(thread.maxTurns);
+      advanced.setArchitectureConfig(thread.architectureConfig ?? {});
+      advanced.setPlanMode(thread.planMode ?? false);
+    }
     // Then attempt to attach to an in-flight stream (if the thread is still
     // live on the server after an F5 / tab switch). 404 is expected when the
     // thread is idle — we silently fall back to the static view.
     if (!stateRef.current.isStreaming) {
       await joinStream(threadId);
     }
-  }, [threadHook, joinStream]);
+  }, [threadHook, restoreMessages, agentConfig, advanced, joinStream]);
+
+  const deleteThread = useCallback(async (threadId: string) => {
+    const { deletedActive } = await threadHook.deleteThread(threadId);
+    if (deletedActive) {
+      clear();
+      advanced.resetAdvancedOptions();
+    }
+  }, [threadHook, clear, advanced]);
 
   const archEntry = agentConfig.config?.architectures[agentConfig.architecture];
-  const overrideRaw = architectureConfig['context_window_override'];
+  const overrideRaw = advanced.architectureConfig['context_window_override'];
   const override = typeof overrideRaw === 'number' && Number.isFinite(overrideRaw) && overrideRaw > 0 ? overrideRaw : undefined;
   const contextWindow = override ?? archEntry?.contextWindows?.[agentConfig.model];
 
@@ -256,26 +197,26 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     setModel,
 
     // Advanced options
-    cwd,
-    setCwd,
-    activeCwd,
+    cwd: advanced.cwd,
+    setCwd: advanced.setCwd,
+    activeCwd: advanced.activeCwd,
     defaultCwd: agentConfig.defaultCwd,
-    systemPrompt,
-    setSystemPrompt,
-    maxTurns,
-    setMaxTurns,
-    architectureConfig,
-    setArchitectureConfig,
-    architectureOptions: agentConfig.config?.architectures[agentConfig.architecture]?.options ?? [],
-    planMode,
-    setPlanMode,
+    systemPrompt: advanced.systemPrompt,
+    setSystemPrompt: advanced.setSystemPrompt,
+    maxTurns: advanced.maxTurns,
+    setMaxTurns: advanced.setMaxTurns,
+    architectureConfig: advanced.architectureConfig,
+    setArchitectureConfig: advanced.setArchitectureConfig,
+    architectureOptions: archEntry?.options ?? [],
+    planMode: advanced.planMode,
+    setPlanMode: advanced.setPlanMode,
 
     // Threads
     threads: threadHook.threads,
     activeThreadId: threadHook.activeThreadId,
     createThread,
     loadThread,
-    deleteThread: threadHook.deleteThread,
+    deleteThread,
     renameThread: threadHook.renameThread,
 
     // Actions
