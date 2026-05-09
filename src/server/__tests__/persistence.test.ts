@@ -34,6 +34,7 @@ describe('persistTurn', () => {
       assistantMessageId: 'a1',
       assistantBlocks: [{ type: 'text', text: 'hello' }],
       resultUsage: { inputTokens: 1, outputTokens: 2 },
+      resultContextSize: 3,
       resultSessionId: 'sess-fresh',
       architecture: 'claude-code',
       model: 'opus',
@@ -43,7 +44,7 @@ describe('persistTurn', () => {
     expect(stored.messages).toHaveLength(2);
     const [u, a] = stored.messages;
     expect(u).toMatchObject({ id: 'u1', architecture: 'claude-code', model: 'opus' });
-    expect(a).toMatchObject({ id: 'a1', architecture: 'claude-code', model: 'opus', usage: { inputTokens: 1, outputTokens: 2 } });
+    expect(a).toMatchObject({ id: 'a1', architecture: 'claude-code', model: 'opus', usage: { inputTokens: 1, outputTokens: 2 }, contextSize: 3 });
     expect(stored.sessionId).toBe('sess-fresh');
   });
 
@@ -57,6 +58,7 @@ describe('persistTurn', () => {
       assistantMessageId: 'a1',
       assistantBlocks: [{ type: 'text', text: 'r1' }],
       resultUsage: undefined,
+      resultContextSize: undefined,
       resultSessionId: 'sess-1',
       architecture: 'claude-code',
       model: 'opus',
@@ -73,6 +75,7 @@ describe('persistTurn', () => {
       assistantMessageId: 'a2',
       assistantBlocks: [{ type: 'text', text: 'r2' }],
       resultUsage: undefined,
+      resultContextSize: undefined,
       resultSessionId: 'sess-2',
       architecture: 'gemini',
       model: 'gemini-flash',

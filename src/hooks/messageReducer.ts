@@ -1,3 +1,4 @@
+import { sumUsage } from '../core/usage.js';
 import type { ChatState, ChatMessage, TodoItem } from '../types.js';
 import type { WireEvent } from '../server/protocol.js';
 import { dispatchEvent } from './eventHandlers/index.js';
@@ -22,6 +23,7 @@ export function createInitialState(architecture: string, model: string): ChatSta
     isStreaming: false,
     error: null,
     usage: null,
+    contextSize: null,
     sessionId: null,
     architecture,
     model,
@@ -69,7 +71,6 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         activeAssistantMessageId: assistantMsg.id,
         isStreaming: true,
         error: null,
-        usage: null,
       };
     }
 
@@ -77,9 +78,21 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
       return dispatchEvent(state, action.event);
 
     case 'RESTORE': {
-      const lastAssistantUsage = [...action.messages]
-        .reverse()
-        .find(m => m.role === 'assistant' && m.usage)?.usage ?? null;
+      const turnUsages = action.messages
+        .filter(m => m.role === 'assistant' && m.usage)
+        .map(m => m.usage!);
+      const cumulative = turnUsages.length > 0 ? sumUsage(...turnUsages) : null;
+      // Pasek context-window pokazuje OSTATNIĄ turę, nie sumę. `storedMessageToChat`
+      // już wypełnia `contextSize` z fallbackiem dla starych wątków bez tego
+      // pola, więc tu wystarczy znaleźć ostatnią assistant-msg.
+      let restoredContextSize: number | null = null;
+      for (let i = action.messages.length - 1; i >= 0; i--) {
+        const m = action.messages[i];
+        if (m.role === 'assistant' && m.contextSize !== undefined) {
+          restoredContextSize = m.contextSize;
+          break;
+        }
+      }
       return {
         ...state,
         messages: action.messages,
@@ -87,7 +100,8 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         activeSubagents: new Map(),
         isStreaming: false,
         error: null,
-        usage: lastAssistantUsage,
+        usage: cumulative,
+        contextSize: restoredContextSize,
         sessionId: action.sessionId ?? null,
         architecture: action.architecture,
         model: action.model,

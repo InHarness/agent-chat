@@ -44,7 +44,7 @@ export type WireEvent =
   | { type: 'subagent_completed'; taskId: string; status: string; summary?: string; usage?: WireUsageStats }
   | { type: 'user_input_request'; request: UserInputRequest }
   | { type: 'user_input_response'; requestId: string; response: UserInputResponse }
-  | { type: 'result'; output: string; usage: WireUsageStats; sessionId?: string }
+  | { type: 'result'; output: string; usage: WireUsageStats; contextSize: number; sessionId?: string }
   | { type: 'error'; error: string; code: string }
   | { type: 'flush' }
   | { type: 'done' };
@@ -137,6 +137,15 @@ export interface StoredMessage {
   subagentTaskId?: string;
   /** Usage stats for this message's turn (mirrors NormalizedMessage.usage). */
   usage?: WireUsageStats;
+  /**
+   * USAGE CONTEXT WINDOW after this turn — total tokens occupying the model's
+   * context window. Equals `usage.inputTokens + usage.outputTokens`. Stored
+   * per-turn so reload (F5) can recover the last turn's value without
+   * recomputing from cumulative billing. Optional: older threads written
+   * before this field existed read back as `undefined` — clients fall back to
+   * computing it from `usage` (see `storedMessageToChat`).
+   */
+  contextSize?: number;
   /**
    * Architecture this message was authored under. Set on persistence so the
    * thread keeps a true audit trail across architecture rollovers; older

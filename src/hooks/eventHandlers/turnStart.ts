@@ -25,7 +25,6 @@ export function handleTurnStart(state: ChatState, event: TurnStartEvent): ChatSt
         activeAssistantMessageId: event.assistantMessageId,
         isStreaming: true,
         error: null,
-        usage: null,
       };
     }
   }
@@ -50,6 +49,5 @@ export function handleTurnStart(state: ChatState, event: TurnStartEvent): ChatSt
     activeAssistantMessageId: event.assistantMessageId,
     isStreaming: true,
     error: null,
-    usage: null,
   };
 }

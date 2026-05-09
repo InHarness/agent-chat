@@ -119,7 +119,7 @@ export function AgentChat({
           planMode={chat.planMode}
           onPlanModeChange={chat.setPlanMode}
         />
-        {showUsage && chat.usage && <UsageDisplay usage={chat.usage} contextWindow={chat.contextWindow} />}
+        {showUsage && <UsageDisplay contextSize={chat.contextSize} contextWindow={chat.contextWindow} />}
       </div>
       {showConfigBar && (
         <>

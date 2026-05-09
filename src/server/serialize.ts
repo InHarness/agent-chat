@@ -24,6 +24,7 @@ export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
         type: 'result',
         output: rest.output as string,
         usage: rest.usage as { inputTokens: number; outputTokens: number },
+        contextSize: rest.contextSize as number,
         sessionId: rest.sessionId as string | undefined,
       };
     }

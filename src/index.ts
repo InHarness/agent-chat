@@ -40,6 +40,7 @@ export { useThreads } from './hooks/useThreads.js';
 export type { ThreadsEndpoints } from './hooks/useThreads.js';
 
 // Utilities
+export { addUsage, sumUsage, contextSizeOf } from './core/usage.js';
 export { batchToolBlocks } from './utils/batchToolBlocks.js';
 export { toolCategory, groupingKey, categoryLabel } from './utils/toolCategory.js';
 export { pairToolBlocks } from './utils/pairToolBlocks.js';

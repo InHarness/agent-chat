@@ -162,6 +162,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     const assistantBlocks: StoredContentBlock[] = [];
     let resultSessionId: string | undefined;
     let resultUsage: WireUsageStats | undefined;
+    let resultContextSize: number | undefined;
 
     // Look up existing session for resumption and decide whether the next turn
     // can resume it or needs a fresh session with the transcript replayed
@@ -235,6 +236,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         if (event.type === 'result') {
           resultSessionId = event.sessionId;
           resultUsage = event.usage;
+          resultContextSize = event.contextSize;
           if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
         }
       }
@@ -304,6 +306,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         assistantMessageId,
         assistantBlocks,
         resultUsage,
+        resultContextSize,
         resultSessionId,
         architecture,
         model,

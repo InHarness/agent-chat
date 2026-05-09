@@ -53,6 +53,13 @@ export interface ChatMessage {
   isStreaming: boolean;
   subagentTaskId?: string;
   usage?: UsageStats;
+  /**
+   * USAGE CONTEXT WINDOW after this assistant turn — `usage.inputTokens +
+   * usage.outputTokens`. Stored per-message so RESTORE can recover the last
+   * turn's value without recomputing. Optional for backward compatibility
+   * with threads persisted before this field existed.
+   */
+  contextSize?: number;
 }
 
 // --- Chat State ---
@@ -75,6 +82,13 @@ export interface ChatState {
   isStreaming: boolean;
   error: Error | null;
   usage: UsageStats | null;
+  /**
+   * USAGE CONTEXT WINDOW after the LAST turn — bounded by the model's window.
+   * Overwritten (NOT summed) on every `result` event. Use this to render the
+   * "X / 200k" utilization bar. Distinct from `usage`, which is cumulative
+   * billing across resumed turns and can exceed the window.
+   */
+  contextSize: number | null;
   sessionId: string | null;
   architecture: string;
   model: string;
@@ -165,7 +179,11 @@ export function storedBlockToUI(block: StoredContentBlock): UIContentBlock {
   }
 }
 
-export function storedMessageToChat(msg: { id: string; role: 'user' | 'assistant'; blocks: StoredContentBlock[]; timestamp: string; subagentTaskId?: string; usage?: UsageStats }): ChatMessage {
+export function storedMessageToChat(msg: { id: string; role: 'user' | 'assistant'; blocks: StoredContentBlock[]; timestamp: string; subagentTaskId?: string; usage?: UsageStats; contextSize?: number }): ChatMessage {
+  // Backward-compat: threads persisted before `contextSize` was introduced
+  // store `usage` only. Recover from inputTokens + outputTokens — same
+  // formula used by every adapter.
+  const contextSize = msg.contextSize ?? (msg.usage ? msg.usage.inputTokens + msg.usage.outputTokens : undefined);
   return {
     id: msg.id,
     role: msg.role,
@@ -174,5 +192,6 @@ export function storedMessageToChat(msg: { id: string; role: 'user' | 'assistant
     isStreaming: false,
     subagentTaskId: msg.subagentTaskId,
     usage: msg.usage,
+    contextSize,
   };
 }

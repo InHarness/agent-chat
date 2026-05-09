@@ -8,6 +8,12 @@ export interface PersistTurnArgs {
   assistantMessageId: string;
   assistantBlocks: StoredContentBlock[];
   resultUsage: WireUsageStats | undefined;
+  /**
+   * Post-turn context-window utilization (`usage.inputTokens + usage.outputTokens`).
+   * Persisted alongside `usage` so reload (F5) can show the correct bar value
+   * without recomputing — and so future RESTORE never has to derive it.
+   */
+  resultContextSize: number | undefined;
   resultSessionId: string | undefined;
   /** Architecture used for this turn — stamped on user + assistant message. */
   architecture: string;
@@ -23,6 +29,7 @@ export function persistTurn(args: PersistTurnArgs): void {
     assistantMessageId,
     assistantBlocks,
     resultUsage,
+    resultContextSize,
     resultSessionId,
     architecture,
     model,
@@ -42,6 +49,7 @@ export function persistTurn(args: PersistTurnArgs): void {
     architecture,
     model,
     ...(resultUsage ? { usage: resultUsage } : {}),
+    ...(resultContextSize !== undefined ? { contextSize: resultContextSize } : {}),
   };
 
   threads.appendMessages(threadId, [stampedUser, assistantMessage], resultSessionId);

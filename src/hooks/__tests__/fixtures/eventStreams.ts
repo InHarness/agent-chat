@@ -38,7 +38,7 @@ export const goldenPathEvents: WireEvent[] = [
   { type: 'text_delta', text: '!', isSubagent: false },
   { type: 'tool_use', toolName: 'Read', toolUseId: 't1', input: { path: '/x' }, isSubagent: false },
   { type: 'tool_result', toolUseId: 't1', summary: 'ok', isSubagent: false },
-  { type: 'result', output: 'done', usage: { inputTokens: 10, outputTokens: 20 } },
+  { type: 'result', output: 'done', usage: { inputTokens: 10, outputTokens: 20 }, contextSize: 30 },
 ];
 
 // Fresh F5 join: turn_start with no preceding USER_MESSAGE.

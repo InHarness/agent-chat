@@ -20,6 +20,7 @@ export function finalizeActiveMessage(
   messages: ChatMessage[],
   activeId: string | null,
   usage?: UsageStats,
+  contextSize?: number,
 ): ChatMessage[] {
   if (!activeId) return messages;
   return messages.map(msg => {
@@ -28,6 +29,7 @@ export function finalizeActiveMessage(
       ...msg,
       isStreaming: false,
       ...(usage ? { usage } : {}),
+      ...(contextSize !== undefined ? { contextSize } : {}),
       blocks: msg.blocks.map(b => {
         if ((b.type === 'text' || b.type === 'thinking') && b.isStreaming) {
           return { ...b, isStreaming: false };

@@ -54,11 +54,13 @@ describe('messageReducer — golden path turn', () => {
     expect(state.activeAssistantMessageId).toBeNull();
     expect(state.isStreaming).toBe(false);
     expect(state.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
+    expect(state.contextSize).toBe(30);
 
     const assistant = state.messages.find(m => m.role === 'assistant')!;
     expect(assistant.id).toBe('srv-a1');
     expect(assistant.isStreaming).toBe(false);
     expect(assistant.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
+    expect(assistant.contextSize).toBe(30);
 
     expect(assistant.blocks).toHaveLength(3);
     expect(assistant.blocks[0]).toEqual({ type: 'text', text: 'Hello world!', isStreaming: false });
@@ -413,6 +415,130 @@ describe('messageReducer — RESTORE / SET_ARCHITECTURE / SET_MODEL / CLEAR', ()
     expect(state.currentTodoItems).toEqual([{ id: '1', content: 'X', status: 'pending' }]);
     expect(state.activeSubagents.size).toBe(0);
     expect(state.isStreaming).toBe(false);
+  });
+
+  it('RESTORE sums per-turn usage deltas across all assistant messages (cumulative)', () => {
+    const restored: ChatMessage[] = [
+      { id: 'u1', role: 'user', blocks: [{ type: 'text', text: 'q1', isStreaming: false }], timestamp: FIXED_TS, isStreaming: false },
+      {
+        id: 'a1',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'r1', isStreaming: false }],
+        timestamp: FIXED_TS,
+        isStreaming: false,
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10 },
+      },
+      { id: 'u2', role: 'user', blocks: [{ type: 'text', text: 'q2', isStreaming: false }], timestamp: FIXED_TS, isStreaming: false },
+      {
+        id: 'a2',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'r2', isStreaming: false }],
+        timestamp: FIXED_TS,
+        isStreaming: false,
+        usage: { inputTokens: 80, outputTokens: 60, cacheCreationInputTokens: 20 },
+      },
+    ];
+    const state = messageReducer(init(), { type: 'RESTORE', messages: restored, architecture: ARCH, model: MODEL });
+    expect(state.usage).toEqual({
+      inputTokens: 180,
+      outputTokens: 110,
+      cacheReadInputTokens: 10,
+      cacheCreationInputTokens: 20,
+    });
+  });
+
+  it('USER_MESSAGE preserves cumulative usage so the running total survives a new turn start', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, goldenPathEvents);
+    const cumulativeAfterTurn1 = state.usage;
+    expect(cumulativeAfterTurn1).toEqual({ inputTokens: 10, outputTokens: 20 });
+
+    state = applyUserMessage(state, 'follow-up');
+    expect(state.usage).toEqual(cumulativeAfterTurn1);
+  });
+
+  it('handleResult adds the new turn delta on top of the prior cumulative', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, goldenPathEvents);
+    expect(state.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
+
+    state = applyUserMessage(state, 'again');
+    state = applyEvents(state, goldenPathEvents);
+    expect(state.usage).toEqual({ inputTokens: 20, outputTokens: 40 });
+  });
+
+  it('contextSize OVERWRITES on each result (never sums) — bounded by model window', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, goldenPathEvents);
+    expect(state.contextSize).toBe(30);
+
+    // Different contextSize value on the second turn — overwrite, not add.
+    state = applyUserMessage(state, 'again');
+    state = applyEvents(state, [
+      turnStart('srv-u2', 'srv-a2', 'again'),
+      { type: 'text_delta', text: 'x', isSubagent: false },
+      { type: 'result', output: 'done', usage: { inputTokens: 80, outputTokens: 25 }, contextSize: 105 },
+    ]);
+    expect(state.contextSize).toBe(105);
+    // Billing is still cumulative — sanity check the two metrics live separately.
+    expect(state.usage).toEqual({ inputTokens: 90, outputTokens: 45 });
+  });
+
+  it('RESTORE picks contextSize from the LAST assistant message (not summed)', () => {
+    const restored: ChatMessage[] = [
+      { id: 'u1', role: 'user', blocks: [{ type: 'text', text: 'q1', isStreaming: false }], timestamp: FIXED_TS, isStreaming: false },
+      {
+        id: 'a1',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'r1', isStreaming: false }],
+        timestamp: FIXED_TS,
+        isStreaming: false,
+        usage: { inputTokens: 100, outputTokens: 50 },
+        contextSize: 150,
+      },
+      { id: 'u2', role: 'user', blocks: [{ type: 'text', text: 'q2', isStreaming: false }], timestamp: FIXED_TS, isStreaming: false },
+      {
+        id: 'a2',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'r2', isStreaming: false }],
+        timestamp: FIXED_TS,
+        isStreaming: false,
+        usage: { inputTokens: 200, outputTokens: 80 },
+        contextSize: 280,
+      },
+    ];
+    const state = messageReducer(init(), { type: 'RESTORE', messages: restored, architecture: ARCH, model: MODEL });
+    expect(state.contextSize).toBe(280);
+  });
+
+  it('RESTORE of legacy thread without contextSize falls back to inputTokens + outputTokens', () => {
+    // `storedMessageToChat` recovers contextSize from `usage` for old persisted
+    // threads; once messages reach the reducer, RESTORE just reads the field.
+    // Here we simulate post-`storedMessageToChat` state directly.
+    const restored: ChatMessage[] = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'r', isStreaming: false }],
+        timestamp: FIXED_TS,
+        isStreaming: false,
+        usage: { inputTokens: 70, outputTokens: 30 },
+        contextSize: 100,
+      },
+    ];
+    const state = messageReducer(init(), { type: 'RESTORE', messages: restored, architecture: ARCH, model: MODEL });
+    expect(state.contextSize).toBe(100);
+  });
+
+  it('RESTORE leaves contextSize null when no assistant message has it', () => {
+    const restored: ChatMessage[] = [
+      { id: 'u1', role: 'user', blocks: [{ type: 'text', text: 'q', isStreaming: false }], timestamp: FIXED_TS, isStreaming: false },
+    ];
+    const state = messageReducer(init(), { type: 'RESTORE', messages: restored, architecture: ARCH, model: MODEL });
+    expect(state.contextSize).toBeNull();
   });
 
   it('RESTORE finds todoList nested in subagent.messages', () => {

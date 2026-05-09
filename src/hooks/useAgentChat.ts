@@ -183,6 +183,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     isStreaming: state.isStreaming,
     error: state.error,
     usage: state.usage,
+    contextSize: state.contextSize,
     sessionId: state.sessionId,
     contextWindow,
     currentTodoItems: state.currentTodoItems,

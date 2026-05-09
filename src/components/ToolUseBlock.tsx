@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import type { ChatMessage, UsageStats } from '../types.js';
 import { AssistantContent } from './AssistantContent.js';
 import { useContextWindow } from './ContextWindowContext.js';
-import { totalContextTokens, contextLevel } from './UsageDisplay.js';
+import { contextLevel } from './UsageDisplay.js';
+import { contextSizeOf } from '../core/usage.js';
 import { useToolRenderer } from '../tools/ToolRendererContext.js';
 import { parseToolResult, prettyToolName } from '../tools/helpers.js';
 import { ToolJsonModal } from '../tools/ToolJsonModal.js';
@@ -54,7 +55,7 @@ export function ToolUseBlock({ toolName, input, defaultCollapsed = true, result,
 
   const subagentCtx = subagent?.usage && contextWindow
     ? (() => {
-        const total = totalContextTokens(subagent.usage);
+        const total = contextSizeOf(subagent.usage);
         const pct = Math.min(100, (total / contextWindow) * 100);
         return { pct, level: contextLevel(pct) };
       })()
