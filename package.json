@@ -1,6 +1,6 @@
 {
   "name": "@inharness-ai/agent-chat",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "React chat UI kit for @inharness-ai/agent-adapters — drop-in components and hooks for AI agent conversations",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -63,7 +63,7 @@
     }
   },
   "dependencies": {
-    "@inharness-ai/agent-adapters": "^0.4.0",
+    "@inharness-ai/agent-adapters": "^0.6.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "react-markdown": "^9.0.0",

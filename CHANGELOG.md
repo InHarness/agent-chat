@@ -2,6 +2,11 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.3.0] — 2026-05-28
+
+### Changed
+- Bumped `@inharness-ai/agent-adapters` dependency from `^0.4.0` to `^0.6.1`, picking up the latest adapter capabilities and fixes.
+
 ## [0.2.0] — 2026-05-13
 
 ### Added
@@ -37,5 +42,6 @@ All notable changes to `@inharness-ai/agent-chat` are documented here. Format ba
 - Server serialization errors now produce clearer messages.
 - README expanded with instant-usage instructions, endpoint configuration docs, and component examples.
 
+[0.3.0]: https://github.com/InHarness/agent-chat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/InHarness/agent-chat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/InHarness/agent-chat/compare/v0.1.0...v0.1.1
