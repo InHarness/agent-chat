@@ -61,8 +61,8 @@ import { createChatHandler } from '@inharness-ai/agent-chat/server';
 const handler = createChatHandler({
   architectures: {
     'claude-code': {
-      models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514'],
-      default: 'claude-sonnet-4-20250514',
+      models: ['opus-4.8', 'sonnet-4.6', 'haiku-4.5'],
+      default: 'opus-4.8',
     },
     'codex': {
       models: ['o4-mini', 'o3'],
