@@ -1,19 +1,20 @@
 import { resolve } from 'path';
 import type { Request, Response } from 'express';
-import type { RuntimeAdapter, UnifiedEvent, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
-import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions, getModelContextWindow } from '@inharness-ai/agent-adapters';
+import type { Architecture, RuntimeAdapter, UnifiedEvent, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
+import { createAdapter, listArchitectures, getModelsForArchitecture, getArchitectureOptions, getModelContextWindow, architectureCapabilities } from '@inharness-ai/agent-adapters';
 import type {
   ArchitectureConfig,
   ServerConfig,
   StoredMessage,
   StoredContentBlock,
   WireUsageStats,
+  WireEvent,
 } from './protocol.js';
 import { serializeSSE, unifiedEventToWire } from './serialize.js';
 import { validateChatRequest } from './validate.js';
 import { SessionManager } from './session-manager.js';
+import { QueueStore } from './queue-store.js';
 import { ThreadStore } from './thread-store.js';
-import { persistTurn } from './persistence.js';
 import { applyEventToStoredBlocks } from './blockReducer.js';
 import { resolveExecutionPlan, isResumeFailureError, buildReplayPromptForFallback } from './executionPlan.js';
 import { defaultLogger, type Logger } from '../utils/logger.js';
@@ -44,6 +45,12 @@ export interface ChatHandler {
   handleUpdateThread: (req: Request, res: Response) => void;
   handleUserInput: (req: Request, res: Response) => void;
   handleStream: (req: Request, res: Response) => void;
+  /** POST /api/chat/queue/:threadId — enqueue a message for a live turn. */
+  handleQueueEnqueue: (req: Request, res: Response) => void;
+  /** DELETE /api/chat/queue/:threadId/:messageId — cancel a single queued message. */
+  handleQueueCancel: (req: Request, res: Response) => void;
+  /** DELETE /api/chat/queue/:threadId — clear a thread's whole queue. */
+  handleQueueClear: (req: Request, res: Response) => void;
   destroy: () => void;
 }
 
@@ -55,6 +62,7 @@ interface PendingUserInput {
 export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   const logger = config.logger ?? defaultLogger;
   const sessions = new SessionManager();
+  const queue = new QueueStore();
   const threads = new ThreadStore(config.threadsDir ?? './threads', logger);
   const maxConcurrent = config.maxConcurrentRequests ?? 10;
   const architectures = config.architectures ?? buildDefaultArchitectures();
@@ -159,10 +167,32 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       timestamp: turnStartTimestamp,
     });
 
-    const assistantBlocks: StoredContentBlock[] = [];
+    // --- Turn accumulator -------------------------------------------------
+    // The composer stays unlocked, so one request may persist more than one
+    // user→assistant exchange: a mid-turn `user_message` (push) splits the
+    // assistant transcript, and after-turn merged dispatch runs extra turns in
+    // the same SSE response. We accumulate every message in delivery order and
+    // persist once at the end. `assistantBlocks` always points at the current
+    // segment's block array.
+    const persisted: StoredMessage[] = [];
+    let assistantBlocks: StoredContentBlock[] = [];
+    let currentAssistant!: StoredMessage;
     let resultSessionId: string | undefined;
-    let resultUsage: WireUsageStats | undefined;
-    let resultContextSize: number | undefined;
+
+    const openTurn = (uMsg: StoredMessage, aId: string): void => {
+      assistantBlocks = [];
+      currentAssistant = {
+        id: aId,
+        role: 'assistant',
+        blocks: assistantBlocks,
+        timestamp: new Date().toISOString(),
+        architecture,
+        model,
+      };
+      persisted.push({ ...uMsg, architecture, model }, currentAssistant);
+    };
+
+    openTurn(userMessage, assistantMessageId);
 
     // Look up existing session for resumption and decide whether the next turn
     // can resume it or needs a fresh session with the transcript replayed
@@ -209,6 +239,11 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       });
     };
 
+    // Streaming-input mode keeps the SDK's input channel open so queued messages
+    // can be pushed into the live turn (mid-turn delivery). Opt-in per
+    // architecture capability; the one-shot path is unchanged for the rest.
+    const streamingInput = architectureCapabilities(architecture as Architecture).midTurnPush;
+
     const baseExecuteArgs = {
       systemPrompt: effectiveSystemPrompt,
       model,
@@ -218,6 +253,7 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       architectureConfig: effectiveArchitectureConfig,
       planMode: effectivePlanMode,
       onUserInput,
+      ...(streamingInput ? { streamingInput: true } : {}),
     };
 
     const consumeStream = async (
@@ -230,19 +266,32 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         const wireEvent = unifiedEventToWire(event as UnifiedEvent & Record<string, unknown>);
         sessions.broadcast(threadId, wireEvent.type, wireEvent);
 
-        // Collect blocks for persistence
+        if (wireEvent.type === 'user_message') {
+          // Mid-turn injection accepted into the live session: close the current
+          // assistant segment and open a new user→assistant pair so the persisted
+          // order mirrors what the model (and the UI) saw.
+          const um = wireEvent as Extract<WireEvent, { type: 'user_message' }>;
+          openTurn(
+            { id: crypto.randomUUID(), role: 'user', blocks: [{ type: 'text', text: um.text }], timestamp: um.timestamp },
+            crypto.randomUUID(),
+          );
+          continue;
+        }
+
+        // Collect blocks for persistence (targets the current assistant segment).
         applyEventToStoredBlocks(assistantBlocks, event);
 
         if (event.type === 'result') {
           resultSessionId = event.sessionId;
-          resultUsage = event.usage;
-          resultContextSize = event.contextSize;
+          currentAssistant.usage = event.usage;
+          currentAssistant.contextSize = event.contextSize;
           if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
         }
       }
     };
 
     try {
+      // First turn — with the codex-style resume-failure fallback.
       try {
         await consumeStream({
           ...baseExecuteArgs,
@@ -278,6 +327,32 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
           throw err;
         }
       }
+
+      // After-turn merged dispatch: anything that piled up in the queue while the
+      // turn ran (push declined, or an architecture without mid-turn support) is
+      // delivered now as a single merged turn that resumes the just-finished
+      // session. Loop until the queue drains.
+      let batch = queue.popAll(threadId);
+      while (batch.length > 0) {
+        sessions.broadcast(threadId, 'queue_updated', { queued: [] });
+        const merged = mergeQueuedPrompts(batch);
+        const uId = crypto.randomUUID();
+        const aId = crypto.randomUUID();
+        const ts = new Date().toISOString();
+        sessions.broadcast(threadId, 'turn_start', {
+          userMessageId: uId,
+          assistantMessageId: aId,
+          prompt: merged,
+          timestamp: ts,
+        });
+        openTurn({ id: uId, role: 'user', blocks: [{ type: 'text', text: merged }], timestamp: ts }, aId);
+        await consumeStream({
+          ...baseExecuteArgs,
+          prompt: merged,
+          resumeSessionId: resultSessionId,
+        });
+        batch = queue.popAll(threadId);
+      }
     } catch (err) {
       const wireError = {
         type: 'error' as const,
@@ -299,18 +374,11 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
         }
       }
 
-      persistTurn({
-        threads,
-        threadId: threadId!,
-        userMessage,
-        assistantMessageId,
-        assistantBlocks,
-        resultUsage,
-        resultContextSize,
-        resultSessionId,
-        architecture,
-        model,
-      });
+      // A turn that errored before its queued messages were delivered leaves rows
+      // behind; emit a fresh snapshot so the UI stops showing them as in-flight.
+      sessions.broadcast(threadId, 'queue_updated', { queued: queue.snapshot(threadId) });
+
+      threads.appendMessages(threadId, persisted, resultSessionId);
     }
   };
 
@@ -410,12 +478,93 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       res.status(400).json({ error: 'requestId is required' });
       return;
     }
+    // Resolve the thread before aborting so we can clear its queue (D4).
+    const threadId = sessions.threadIdForRequest(requestId);
     const aborted = sessions.abort(requestId);
-    if (aborted) {
-      res.json({ ok: true });
-    } else {
+    if (!aborted) {
       res.status(404).json({ error: 'No active request with that ID' });
+      return;
     }
+    // D4: Stop is a full stop — clear the queue and return the texts so the
+    // composer can restore them. Also broadcast `queue_cleared` for any OTHER
+    // live-join clients of this thread (the aborting client closes its own SSE,
+    // so it relies on this response body instead).
+    let clearedTexts: string[] = [];
+    if (threadId) {
+      clearedTexts = queue.clear(threadId).map(m => m.text);
+      if (clearedTexts.length > 0) {
+        sessions.broadcast(threadId, 'queue_cleared', { texts: clearedTexts });
+      }
+    }
+    res.json({ ok: true, clearedTexts });
+  };
+
+  const handleQueueEnqueue = (req: Request, res: Response): void => {
+    const threadId = req.params.threadId as string;
+    if (!threadId) {
+      res.status(400).json({ error: 'threadId is required' });
+      return;
+    }
+    const { prompt } = req.body as { prompt?: string };
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      res.status(400).json({ error: 'prompt is required' });
+      return;
+    }
+    // Queueing only makes sense while a turn is live; otherwise the client
+    // should POST /api/chat to start one.
+    const session = sessions.getByThread(threadId);
+    if (!session || session.removalTimer) {
+      res.status(409).json({ error: 'NO_ACTIVE_STREAM' });
+      return;
+    }
+    if (queue.isFull(threadId)) {
+      res.status(400).json({ error: 'QUEUE_FULL' });
+      return;
+    }
+
+    const text = prompt.trim();
+    const row = queue.enqueue(threadId, text, new Date().toISOString());
+
+    // Mid-turn delivery: when the architecture supports it and the live adapter
+    // accepts the push, the message rides the open input channel and surfaces as
+    // a `user_message` event — so drop the row (after-turn dispatch would double
+    // it). A declined push (turn closing) leaves the row for after-turn merge.
+    if (architectureCapabilities(session.architecture as Architecture).midTurnPush && session.adapter.pushMessage) {
+      let pushed = false;
+      try {
+        pushed = session.adapter.pushMessage(text);
+      } catch {
+        pushed = false;
+      }
+      if (pushed) queue.remove(threadId, row.id);
+    }
+
+    const snapshot = queue.snapshot(threadId);
+    sessions.broadcast(threadId, 'queue_updated', { queued: snapshot });
+    res.status(202).json({ queued: snapshot });
+  };
+
+  const handleQueueCancel = (req: Request, res: Response): void => {
+    const threadId = req.params.threadId as string;
+    const messageId = req.params.messageId as string;
+    const removed = queue.remove(threadId, messageId);
+    if (!removed) {
+      // Already delivered (raced with dispatch) — tolerated.
+      res.status(404).json({ error: 'No queued message with that ID' });
+      return;
+    }
+    const snapshot = queue.snapshot(threadId);
+    sessions.broadcast(threadId, 'queue_updated', { queued: snapshot });
+    res.json({ queued: snapshot });
+  };
+
+  const handleQueueClear = (req: Request, res: Response): void => {
+    const threadId = req.params.threadId as string;
+    const clearedTexts = queue.clear(threadId).map(m => m.text);
+    if (clearedTexts.length > 0) {
+      sessions.broadcast(threadId, 'queue_cleared', { texts: clearedTexts });
+    }
+    res.json({ clearedTexts });
   };
 
   const handleConfig = (_req: Request, res: Response): void => {
@@ -438,7 +587,8 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       res.status(404).json({ error: 'Thread not found' });
       return;
     }
-    res.json(thread);
+    // Attach the live queue snapshot so the client can hydrate chips after F5.
+    res.json({ ...thread, queuedMessages: queue.snapshot(id) });
   };
 
   const handleCreateThread = (req: Request, res: Response): void => {
@@ -529,8 +679,20 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     handleUpdateThread,
     handleUserInput,
     handleStream,
+    handleQueueEnqueue,
+    handleQueueCancel,
+    handleQueueClear,
     destroy,
   };
+}
+
+/**
+ * Merge several queued messages into one prompt for after-turn dispatch
+ * (decision D3 — one merged turn, one agent reply). Each message becomes a
+ * separated block.
+ */
+function mergeQueuedPrompts(batch: { text: string }[]): string {
+  return batch.map(m => m.text).join('\n\n---\n\n');
 }
 
 // Walk thread messages and attach a response to the matching userInputRequest

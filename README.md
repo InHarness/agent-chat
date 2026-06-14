@@ -321,8 +321,11 @@ interface ChatHandlerConfig {
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/chat` | Start a chat turn (returns SSE stream) |
-| `POST` | `/api/chat/abort` | Abort an active stream by `requestId` |
+| `POST` | `/api/chat/abort` | Abort an active stream by `requestId` (clears the thread's queue; response carries `clearedTexts`) |
 | `GET` | `/api/chat/stream/:threadId` | Join an in-flight stream live (used after F5 / thread switch) |
+| `POST` | `/api/chat/queue/:threadId` | Enqueue a message while a turn is live (`{ prompt }` → 202 + queue snapshot) |
+| `DELETE` | `/api/chat/queue/:threadId/:messageId` | Cancel a single queued message |
+| `DELETE` | `/api/chat/queue/:threadId` | Clear the thread's queue (returns `clearedTexts`) |
 | `GET` | `/api/config` | Available architectures and models |
 | `GET` | `/api/threads` | List all threads (metadata only) |
 | `POST` | `/api/threads` | Create a new thread |
@@ -447,6 +450,15 @@ data: {"type":"subagent_completed","taskId":"...","status":"success","summary":"
 event: result
 data: {"type":"result","output":"...","usage":{"inputTokens":150,"outputTokens":42},"sessionId":"..."}
 
+event: user_message
+data: {"type":"user_message","text":"a queued message delivered mid-turn","timestamp":"2026-04-28T00:00:00.000Z"}
+
+event: queue_updated
+data: {"type":"queue_updated","queued":[{"id":"...","text":"...","createdAt":"..."}]}
+
+event: queue_cleared
+data: {"type":"queue_cleared","texts":["restored into the composer"]}
+
 event: error
 data: {"type":"error","error":"...","code":"..."}
 
@@ -458,6 +470,44 @@ data: {}
 ```
 
 Subagent-scoped events (`text_delta`, `thinking`, `tool_use`, `tool_result`, `todo_list_updated`) include a `subagentTaskId` when they belong to a specific subagent run, used for routing into the matching `<SubagentPanel />`.
+
+## Message queueing
+
+The composer stays **unlocked while the agent is working**. A message sent during
+a live turn is queued and delivered to the model — `useAgentChat.sendMessage`
+routes to the queue automatically when `isStreaming`, so the component API is
+unchanged (one `Send` handler). Queued messages render as chips above the
+composer (`queuedMessages`, `cancelQueuedMessage`, `clearQueue` on the hook).
+
+**Delivery (default reference behavior):**
+
+- **Mid-turn (D2)** — when the architecture supports it
+  (`architectureCapabilities(arch).midTurnPush` — `claude-code` family today) and
+  the live adapter accepts the push, the message is injected into the running
+  session and surfaces as a `user_message` event in the same turn. The handler
+  enables this by passing `streamingInput: true` to `adapter.execute`.
+- **After-turn (fallback, universal)** — otherwise the message waits and, when the
+  turn ends, the queue is drained into **one merged turn** (D3) that resumes the
+  same session. Works with any architecture (and with agent-adapters ≥0.6.4,
+  before `pushMessage` existed) — feature detection simply skips the push.
+
+**Stop / abort (D4)** — Stop clears the queue and the texts are returned to the
+composer (concatenated). The aborting client reads them from the abort response;
+other live-join clients of the thread receive a `queue_cleared` broadcast. Wire
+`AgentChatConfig.onQueueCleared` to restore them into your own composer.
+
+**Events:** `user_message` (mid-turn delivery), `queue_updated` (full snapshot
+after every enqueue/delivery/cancel), `queue_cleared` (Stop/clear, carries the
+texts). `GET /api/threads/:id` includes a `queuedMessages` snapshot so chips
+hydrate after F5.
+
+> **Note on `user_message.timestamp`:** agent-adapters emits it as epoch-ms
+> (number); the reference handler maps it to an ISO string on the wire so it
+> matches `turn_start.timestamp`.
+
+The bundled `createChatHandler` keeps the queue in memory (`QueueStore`).
+Applications with durable storage implement the same contract their own way —
+the wire events and routing are the integration surface.
 
 ## Development
 

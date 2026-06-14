@@ -113,6 +113,9 @@ export async function runBasic(argv: string[]): Promise<void> {
   app.post('/api/chat/abort', handler.handleAbort);
   app.post('/api/chat/user-input', handler.handleUserInput);
   app.get('/api/chat/stream/:threadId', handler.handleStream);
+  app.post('/api/chat/queue/:threadId', handler.handleQueueEnqueue);
+  app.delete('/api/chat/queue/:threadId/:messageId', handler.handleQueueCancel);
+  app.delete('/api/chat/queue/:threadId', handler.handleQueueClear);
   app.get('/api/config', handler.handleConfig);
 
   app.get('/api/threads', handler.handleListThreads);

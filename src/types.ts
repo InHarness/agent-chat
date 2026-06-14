@@ -6,6 +6,7 @@ import type {
   ThreadMeta,
   StoredContentBlock,
   WireUsageStats,
+  QueuedMessage,
 } from './server/protocol.js';
 import type { ToolCategory } from './utils/toolCategory.js';
 import type { TodoItem, UserInputRequest, UserInputResponse } from '@inharness-ai/agent-adapters';
@@ -13,7 +14,7 @@ import type { ToolRendererRegistry } from './tools/types.js';
 import type { Logger } from './utils/logger.js';
 
 // Re-export wire types for consumers
-export type { WireEvent, ServerConfig, ThreadMeta };
+export type { WireEvent, ServerConfig, ThreadMeta, QueuedMessage };
 export type { ArchOption, ArchOptionType } from '@inharness-ai/agent-adapters';
 export type { ToolCategory } from './utils/toolCategory.js';
 export type { Logger } from './utils/logger.js';
@@ -94,6 +95,13 @@ export interface ChatState {
   model: string;
   /** Latest TODO list snapshot for the active thread (sticky header). */
   currentTodoItems: TodoItem[] | null;
+  /**
+   * Messages the user typed during a live turn that are waiting to be delivered
+   * (mid-turn push or after-turn merged dispatch). Rendered separately from
+   * `messages` (e.g. as chips above the composer); reconciled from the server's
+   * `queue_updated` / `queue_cleared` broadcasts.
+   */
+  queuedMessages: QueuedMessage[];
 }
 
 // --- Hook Config ---
@@ -117,6 +125,13 @@ export interface AgentChatConfig {
    * and stays silent in production.
    */
   logger?: Logger;
+  /**
+   * Called when the server clears the thread's queue (Stop/abort or explicit
+   * clear) and returns the texts of the cleared messages so the application can
+   * restore them into the composer (decision D4). Fires on the `queue_cleared`
+   * wire event.
+   */
+  onQueueCleared?: (texts: string[]) => void;
 }
 
 // --- Component Props ---

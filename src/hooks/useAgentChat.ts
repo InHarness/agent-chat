@@ -11,7 +11,7 @@ import { useAdvancedOptions } from './useAdvancedOptions.js';
 import { useChatActions } from './useChatActions.js';
 
 export function useAgentChat(chatConfig: AgentChatConfig) {
-  const { serverUrl, endpoints, logger } = chatConfig;
+  const { serverUrl, endpoints, logger, onQueueCleared } = chatConfig;
 
   // Config (architectures + models from server)
   const agentConfig = useAgentConfig(serverUrl);
@@ -56,7 +56,12 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
 
   const onEvent = useCallback((event: WireEvent) => {
     handleWireEvent(event);
-  }, [handleWireEvent]);
+    // D4: when the server clears the queue (Stop/abort or explicit clear), hand
+    // the cleared texts back to the app so it can restore them into the composer.
+    if (event.type === 'queue_cleared') {
+      onQueueCleared?.(event.texts);
+    }
+  }, [handleWireEvent, onQueueCleared]);
 
   const onError = useCallback((error: Error) => {
     handleWireEvent({ type: 'error', error: error.message, code: 'NETWORK_ERROR' });
@@ -68,7 +73,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
   }, [threadHook]);
 
   // Event stream
-  const { startStream, joinStream, abort: abortStream } = useEventStream({
+  const { startStream, joinStream, abort: abortStream, queueMessage, cancelQueued, clearQueue: clearQueueStream } = useEventStream({
     serverUrl,
     endpoints: endpoints?.stream,
     logger,
@@ -103,14 +108,17 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     advanced.planMode,
   ]);
 
-  // Actions (sendMessage, abort, sendUserInputResponse)
-  const { sendMessage, abort, sendUserInputResponse } = useChatActions({
+  // Actions (sendMessage, abort, sendUserInputResponse, queue actions)
+  const { sendMessage, abort, sendUserInputResponse, cancelQueuedMessage, clearQueue } = useChatActions({
     serverUrl,
     stateRef,
     sendUserMessage,
     handleWireEvent,
     startStream,
     abortStream,
+    queueMessage,
+    cancelQueued,
+    clearQueue: clearQueueStream,
     refreshThreads: threadHook.refreshThreads,
     getRequest,
   });
@@ -147,7 +155,10 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     const thread = await threadHook.loadThread(threadId);
     if (thread) {
       const messages = thread.messages.map(storedMessageToChat);
-      restoreMessages(messages, thread.sessionId, thread.architecture, thread.model);
+      // GET /api/threads/:id may attach the thread's live queue snapshot
+      // (reference handler does) so chips hydrate after F5/resume.
+      const queued = (thread as { queuedMessages?: import('../server/protocol.js').QueuedMessage[] }).queuedMessages;
+      restoreMessages(messages, thread.sessionId, thread.architecture, thread.model, queued);
       if (thread.architecture) agentConfig.setArchitecture(thread.architecture);
       if (thread.model) agentConfig.setModel(thread.model);
       advanced.setActiveCwd(thread.cwd ?? null);
@@ -218,6 +229,11 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     loadThread,
     deleteThread,
     renameThread: threadHook.renameThread,
+
+    // Queue
+    queuedMessages: state.queuedMessages,
+    cancelQueuedMessage,
+    clearQueue,
 
     // Actions
     sendMessage,

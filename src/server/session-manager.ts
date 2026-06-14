@@ -9,7 +9,7 @@ export type SessionListener = (event: BufferedEvent) => void;
 export interface ActiveSession {
   threadId: string;
   requestId: string;
-  adapter: { abort(): void };
+  adapter: { abort(): void; pushMessage?(text: string): boolean };
   architecture: string;
   sessionId?: string;
   createdAt: number;
@@ -63,7 +63,7 @@ export class SessionManager {
   register(
     threadId: string,
     requestId: string,
-    adapter: { abort(): void },
+    adapter: { abort(): void; pushMessage?(text: string): boolean },
     architecture: string,
   ): ActiveSession | null {
     const existing = this.byThread.get(threadId);
@@ -96,6 +96,11 @@ export class SessionManager {
    */
   getByThread(threadId: string): ActiveSession | null {
     return this.byThread.get(threadId) ?? null;
+  }
+
+  /** Resolve the thread a request belongs to (works during the removal grace window). */
+  threadIdForRequest(requestId: string): string | null {
+    return this.byRequest.get(requestId) ?? null;
   }
 
   setSessionId(requestId: string, sessionId: string): void {

@@ -7,6 +7,7 @@ export type {
   WireNormalizedMessage,
   WireContentBlock,
   WireUsageStats,
+  QueuedMessage,
   ChatRequest,
   ServerConfig,
   ArchitectureConfig,

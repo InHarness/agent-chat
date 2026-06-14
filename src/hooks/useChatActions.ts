@@ -21,6 +21,9 @@ export interface UseChatActionsParams {
   handleWireEvent: (e: WireEvent) => void;
   startStream: (request: ChatRequest) => Promise<void>;
   abortStream: () => Promise<void> | void;
+  queueMessage: (threadId: string, payload: { prompt: string }) => Promise<void>;
+  cancelQueued: (threadId: string, messageId: string) => Promise<void>;
+  clearQueue: (threadId: string) => Promise<void>;
   refreshThreads: () => Promise<void>;
   getRequest: () => ChatActionRequest;
 }
@@ -33,19 +36,39 @@ export function useChatActions(params: UseChatActionsParams) {
     handleWireEvent,
     startStream,
     abortStream,
+    queueMessage,
+    cancelQueued,
+    clearQueue,
     refreshThreads,
     getRequest,
   } = params;
 
   const sendMessage = useCallback(async (text: string) => {
-    if (stateRef.current.isStreaming) return;
-    if (!text.trim()) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
 
-    sendUserMessage(text);
-
+    // Composer stays unlocked during a turn: route to the queue instead of
+    // blocking. The server delivers it mid-turn (push) or after the turn
+    // (merged dispatch) and broadcasts `queue_updated`, which renders the chip.
     const o = getRequest();
+    if (stateRef.current.isStreaming) {
+      if (!o.activeThreadId) return; // no live thread to enqueue against
+      try {
+        await queueMessage(o.activeThreadId, { prompt: trimmed });
+      } catch (e) {
+        handleWireEvent({
+          type: 'error',
+          error: (e as Error).message ?? 'Failed to queue message',
+          code: 'QUEUE_ERROR',
+        });
+      }
+      return;
+    }
+
+    sendUserMessage(trimmed);
+
     await startStream({
-      prompt: text,
+      prompt: trimmed,
       threadId: o.activeThreadId ?? undefined,
       architecture: o.architecture,
       model: o.model,
@@ -58,9 +81,24 @@ export function useChatActions(params: UseChatActionsParams) {
     });
 
     await refreshThreads();
-  }, [stateRef, sendUserMessage, getRequest, startStream, refreshThreads]);
+  }, [stateRef, sendUserMessage, handleWireEvent, getRequest, startStream, queueMessage, refreshThreads]);
+
+  const cancelQueuedMessage = useCallback(async (messageId: string) => {
+    const { activeThreadId } = getRequest();
+    if (!activeThreadId) return;
+    await cancelQueued(activeThreadId, messageId);
+  }, [getRequest, cancelQueued]);
+
+  const clearQueuedMessages = useCallback(async () => {
+    const { activeThreadId } = getRequest();
+    if (!activeThreadId) return;
+    await clearQueue(activeThreadId);
+  }, [getRequest, clearQueue]);
 
   const abort = useCallback(() => {
+    // Fire-and-forget Stop. The server clears the thread's queue and broadcasts
+    // `queue_cleared` (with the texts) over SSE; the composer restoration (D4)
+    // happens via `AgentChatConfig.onQueueCleared`, not the abort response.
     abortStream();
     handleWireEvent({ type: 'error', error: 'Request aborted', code: 'ABORTED' });
   }, [abortStream, handleWireEvent]);
@@ -87,5 +125,5 @@ export function useChatActions(params: UseChatActionsParams) {
     }
   }, [serverUrl, handleWireEvent]);
 
-  return { sendMessage, abort, sendUserInputResponse };
+  return { sendMessage, abort, sendUserInputResponse, cancelQueuedMessage, clearQueue: clearQueuedMessages };
 }
