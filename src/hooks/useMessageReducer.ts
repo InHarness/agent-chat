@@ -1,6 +1,6 @@
 import { useReducer, useCallback } from 'react';
 import type { ChatMessage } from '../types.js';
-import type { WireEvent } from '../server/protocol.js';
+import type { WireEvent, QueuedMessage } from '../server/protocol.js';
 import { messageReducer, createInitialState } from './messageReducer.js';
 
 export { messageReducer, createInitialState } from './messageReducer.js';
@@ -17,8 +17,8 @@ export function useMessageReducer(architecture: string, model: string) {
     dispatch({ type: 'EVENT', event });
   }, []);
 
-  const restoreMessages = useCallback((messages: ChatMessage[], sessionId?: string, arch?: string, mdl?: string) => {
-    dispatch({ type: 'RESTORE', messages, sessionId, architecture: arch ?? architecture, model: mdl ?? model });
+  const restoreMessages = useCallback((messages: ChatMessage[], sessionId?: string, arch?: string, mdl?: string, queuedMessages?: QueuedMessage[]) => {
+    dispatch({ type: 'RESTORE', messages, sessionId, architecture: arch ?? architecture, model: mdl ?? model, queuedMessages });
   }, [architecture, model]);
 
   const setArchitecture = useCallback((arch: string) => {

@@ -1,6 +1,6 @@
 import { sumUsage } from '../core/usage.js';
 import type { ChatState, ChatMessage, TodoItem } from '../types.js';
-import type { WireEvent } from '../server/protocol.js';
+import type { WireEvent, QueuedMessage } from '../server/protocol.js';
 import { dispatchEvent } from './eventHandlers/index.js';
 
 // --- Actions ---
@@ -8,7 +8,7 @@ import { dispatchEvent } from './eventHandlers/index.js';
 export type MessageAction =
   | { type: 'USER_MESSAGE'; text: string }
   | { type: 'EVENT'; event: WireEvent }
-  | { type: 'RESTORE'; messages: ChatMessage[]; sessionId?: string; architecture: string; model: string }
+  | { type: 'RESTORE'; messages: ChatMessage[]; sessionId?: string; architecture: string; model: string; queuedMessages?: QueuedMessage[] }
   | { type: 'SET_ARCHITECTURE'; architecture: string }
   | { type: 'SET_MODEL'; model: string }
   | { type: 'CLEAR' };
@@ -28,6 +28,7 @@ export function createInitialState(architecture: string, model: string): ChatSta
     architecture,
     model,
     currentTodoItems: null,
+    queuedMessages: [],
   };
 }
 
@@ -106,6 +107,9 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         architecture: action.architecture,
         model: action.model,
         currentTodoItems: findLatestTodoItems(action.messages),
+        // Reset by default (thread switch) — hydrated from the thread's queue
+        // snapshot when provided (GET /api/threads/:id → queuedMessages).
+        queuedMessages: action.queuedMessages ?? [],
       };
     }
 

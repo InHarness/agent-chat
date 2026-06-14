@@ -78,6 +78,7 @@ export type {
 
 export type {
   WireEvent,
+  QueuedMessage,
   ServerConfig,
   ThreadMeta,
   UserInputRequest,

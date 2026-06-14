@@ -30,6 +30,18 @@ export interface WireNormalizedMessage {
   usage?: WireUsageStats;
 }
 
+/**
+ * A message waiting in the per-thread queue (composer stayed unlocked during a
+ * live turn). Transient: a row exists from enqueue until delivery (mid-turn push
+ * or after-turn merged dispatch), then it is removed.
+ */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  /** ISO timestamp of when the message was enqueued. */
+  createdAt: string;
+}
+
 export type WireEvent =
   | { type: 'connected'; requestId: string }
   | { type: 'turn_start'; userMessageId: string; assistantMessageId: string; prompt: string; timestamp: string }
@@ -45,6 +57,17 @@ export type WireEvent =
   | { type: 'user_input_request'; request: UserInputRequest }
   | { type: 'user_input_response'; requestId: string; response: UserInputResponse }
   | { type: 'result'; output: string; usage: WireUsageStats; contextSize: number; sessionId?: string }
+  // A queued user message was injected into the live session mid-turn (forward of
+  // UnifiedEvent `user_message` from agent-adapters ≥0.7.0). NOTE: the adapter
+  // emits `timestamp` as epoch-ms (number); the server maps it to an ISO string
+  // here so it stays consistent with `turn_start.timestamp`.
+  | { type: 'user_message'; text: string; timestamp: string }
+  // Full snapshot of a thread's queue, broadcast after every mutation
+  // (enqueue / delivery / cancel).
+  | { type: 'queue_updated'; queued: QueuedMessage[] }
+  // The queue was cleared (Stop/abort or explicit clear). Carries the texts so
+  // the composer can restore them (decision D4).
+  | { type: 'queue_cleared'; texts: string[] }
   | { type: 'error'; error: string; code: string }
   | { type: 'flush' }
   | { type: 'done' };
@@ -76,6 +99,9 @@ export const isSubagentCompletedEvent = guard('subagent_completed');
 export const isUserInputRequestEvent = guard('user_input_request');
 export const isUserInputResponseEvent = guard('user_input_response');
 export const isResultEvent = guard('result');
+export const isUserMessageEvent = guard('user_message');
+export const isQueueUpdatedEvent = guard('queue_updated');
+export const isQueueClearedEvent = guard('queue_cleared');
 export const isErrorEvent = guard('error');
 export const isFlushEvent = guard('flush');
 export const isDoneEvent = guard('done');

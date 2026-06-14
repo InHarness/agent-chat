@@ -54,6 +54,13 @@ export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
       const { native, ...cleanReq } = req;
       return { type: 'user_input_request', request: cleanReq } as unknown as WireEvent;
     }
+    case 'user_message': {
+      // agent-adapters ≥0.7.0 emits `timestamp` as epoch-ms (number). Map it to
+      // an ISO string so it stays consistent with `turn_start.timestamp`.
+      const ts = event.timestamp;
+      const timestamp = typeof ts === 'number' ? new Date(ts).toISOString() : String(ts ?? '');
+      return { type: 'user_message', text: String(event.text ?? ''), timestamp };
+    }
     default:
       return event as WireEvent;
   }

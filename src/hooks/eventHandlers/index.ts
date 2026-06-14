@@ -9,6 +9,9 @@ import { handleTodoListUpdated } from './todoList.js';
 import { handleSubagentStarted, handleSubagentProgress, handleSubagentCompleted } from './subagentLifecycle.js';
 import { handleUserInputRequest, handleUserInputResponse } from './userInput.js';
 import { handleResult } from './result.js';
+import { handleUserMessage } from './userMessage.js';
+import { handleQueueUpdated } from './queueUpdated.js';
+import { handleQueueCleared } from './queueCleared.js';
 import { handleError } from './error.js';
 
 type EventByType<T extends WireEvent['type']> = Extract<WireEvent, { type: T }>;
@@ -33,6 +36,9 @@ const HANDLERS: HandlerMap = {
   user_input_request: handleUserInputRequest,
   user_input_response: handleUserInputResponse,
   result: handleResult,
+  user_message: handleUserMessage,
+  queue_updated: handleQueueUpdated,
+  queue_cleared: handleQueueCleared,
   error: handleError,
   flush: identity,
   done: identity,

@@ -38,7 +38,14 @@ export function AgentChat({
   batchTools = false,
   toolRenderers,
 }: AgentChatProps) {
-  const chat = useAgentChat({ serverUrl });
+  // D4: when the server clears the queue (Stop/abort), restore the texts into
+  // the composer via a bumped nonce.
+  const [queueRestore, setQueueRestore] = useState<{ text: string; nonce: number }>({ text: '', nonce: 0 });
+  const chat = useAgentChat({
+    serverUrl,
+    onQueueCleared: (texts) =>
+      setQueueRestore(r => ({ text: texts.join('\n\n'), nonce: r.nonce + 1 })),
+  });
   const [sidebarOpen, setSidebarOpen] = useState(() => readStoredFlag(SIDEBAR_STORAGE_KEY, true));
   const [advancedOpen, setAdvancedOpen] = useState(() => readStoredFlag(ADVANCED_STORAGE_KEY, false));
 
@@ -118,6 +125,10 @@ export function AgentChat({
           disabled={chat.configLoading}
           planMode={chat.planMode}
           onPlanModeChange={chat.setPlanMode}
+          queuedMessages={chat.queuedMessages}
+          onCancelQueued={chat.cancelQueuedMessage}
+          restoreText={queueRestore.text}
+          restoreNonce={queueRestore.nonce}
         />
         {showUsage && <UsageDisplay contextSize={chat.contextSize} contextWindow={chat.contextWindow} />}
       </div>
