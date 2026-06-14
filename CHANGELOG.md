@@ -2,6 +2,18 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.3.1] — 2026-06-14
+
+### Added
+- Message queueing + mid-turn injection: the composer now stays unlocked during a live turn. Messages typed while the agent is working are queued and delivered either **mid-turn** (pushed into the live Claude Agent SDK session) or **after-turn** (merged into a single follow-up turn). Adds `user_message` / `queue_updated` / `queue_cleared` wire events, the `QueuedMessage` type, queue endpoints, an in-memory queue store on the reference server, queue chips in the UI, and Send-to-queue + Stop controls.
+
+### Changed
+- Bumped `@inharness-ai/agent-adapters` dependency from `^0.6.1` to `^0.8.0`.
+- Updated README with the new model names and defaults for the `claude-code` architecture; added `CHANGES-0.1.1.md` documenting the per-turn `contextSize` rollout.
+
+### Fixed
+- Picked up the `agent-adapters@0.8.0` fix where importing the package no longer eagerly loads the optional `@anthropic-ai/claude-agent-sdk` peer — the SDK is now imported lazily, so consumers (and servers) that don't use the `claude-code` architecture no longer need that package installed to import the adapters.
+
 ## [0.3.0] — 2026-05-28
 
 ### Changed
@@ -42,6 +54,7 @@ All notable changes to `@inharness-ai/agent-chat` are documented here. Format ba
 - Server serialization errors now produce clearer messages.
 - README expanded with instant-usage instructions, endpoint configuration docs, and component examples.
 
+[0.3.1]: https://github.com/InHarness/agent-chat/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/InHarness/agent-chat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/InHarness/agent-chat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/InHarness/agent-chat/compare/v0.1.0...v0.1.1
