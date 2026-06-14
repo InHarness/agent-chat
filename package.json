@@ -63,7 +63,7 @@
     }
   },
   "dependencies": {
-    "@inharness-ai/agent-adapters": "file:../agent-adapters-mid-turn-push",
+    "@inharness-ai/agent-adapters": "^0.7.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "react-markdown": "^9.0.0",
