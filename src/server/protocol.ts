@@ -48,7 +48,7 @@ export type WireEvent =
   | { type: 'text_delta'; text: string; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'thinking'; text: string; isSubagent: boolean; replace?: boolean; subagentTaskId?: string }
   | { type: 'tool_use'; toolName: string; toolUseId: string; input: unknown; isSubagent: boolean; subagentTaskId?: string }
-  | { type: 'tool_result'; toolUseId: string; summary: string; isSubagent: boolean; subagentTaskId?: string }
+  | { type: 'tool_result'; toolUseId: string; summary: string; isError?: boolean; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'todo_list_updated'; items: TodoItem[]; source: 'model-tool' | 'session-state'; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'assistant_message'; message: WireNormalizedMessage }
   | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }

@@ -30,7 +30,14 @@ export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
     }
     case 'error': {
       const err = event.error as (Error & { cause?: unknown }) | undefined;
-      const baseMsg = err?.message ?? String(err);
+      // Adapter pass-through errors are not always real `Error` instances: a
+      // structured-cloned or JSON-round-tripped one arrives as a plain object,
+      // and `String(obj)` yields "[object Object]". Fall back to `name` before
+      // giving up on a readable message.
+      const baseMsg =
+        typeof err?.message === 'string' && err.message ? err.message :
+        typeof err?.name === 'string' && err.name ? err.name :
+        String(err);
       const causeMsg =
         err?.cause instanceof Error ? err.cause.message :
         typeof err?.cause === 'string' ? err.cause : undefined;

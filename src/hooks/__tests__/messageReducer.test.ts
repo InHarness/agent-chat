@@ -12,6 +12,7 @@ import {
   freshJoinF5Events,
   goldenPathEvents,
   makeUserInputRequest,
+  subagentLateToolResultEvents,
   subagentLifecycleEvents,
   thinkingReplaceEvents,
   todoListConsecutiveEvents,
@@ -244,7 +245,9 @@ describe('messageReducer — subagent lifecycle', () => {
     state = applyUserMessage(state, 'hi');
     state = applyEvents(state, [turnStart('srv-u1'), ...subagentLifecycleEvents]);
 
-    expect(state.activeSubagents.has('sub-1')).toBe(false);
+    // The registry entry survives completion (flipped to 'completed') so that
+    // late events for this taskId still resolve to its panel.
+    expect(state.activeSubagents.get('sub-1')).toMatchObject({ taskId: 'sub-1', status: 'completed' });
 
     const assistant = state.messages.find(m => m.role === 'assistant')!;
     const sub = assistant.blocks.find(b => b.type === 'subagent') as SubagentBlock;
@@ -267,12 +270,14 @@ describe('messageReducer — subagent lifecycle', () => {
     // Top-level assistant must not own these sub blocks.
     expect(assistant.blocks.some(b => b.type === 'text' || b.type === 'toolUse' || b.type === 'toolResult')).toBe(false);
 
-    // Late event for the completed taskId is a no-op.
-    const before = state;
-    const after = applyEvents(state, [
-      { type: 'text_delta', text: 'late', isSubagent: true, subagentTaskId: 'sub-1' },
+    // A late event for the completed taskId still lands in ITS panel.
+    state = applyEvents(state, [
+      { type: 'text_delta', text: ' late', isSubagent: true, subagentTaskId: 'sub-1' },
     ]);
-    expect(after).toBe(before);
+    const lateSub = state.messages.find(m => m.role === 'assistant')!
+      .blocks.find(b => b.type === 'subagent') as SubagentBlock;
+    const lateText = lateSub.messages[0].blocks.filter(b => b.type === 'text') as TextBlock[];
+    expect(lateText.map(b => b.text).join('')).toContain('late');
   });
 
   it('subagent_progress for an unknown taskId is a no-op', () => {
@@ -284,6 +289,62 @@ describe('messageReducer — subagent lifecycle', () => {
       { type: 'subagent_progress', taskId: 'never-started', description: 'x' },
     ]);
     expect(after).toBe(before);
+  });
+});
+
+describe('messageReducer — late and mis-addressed subagent tool_result', () => {
+  function getSubBlock(state: ChatState): SubagentBlock {
+    return state.messages.find(m => m.role === 'assistant')!
+      .blocks.find(b => b.type === 'subagent') as SubagentBlock;
+  }
+
+  it('closes the toolUse card in the subagent panel when tool_result arrives after subagent_completed', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [turnStart('srv-u1'), ...subagentLateToolResultEvents]);
+
+    const sub = getSubBlock(state);
+    const subBlocks = sub.messages.flatMap(m => m.blocks);
+    const toolUse = subBlocks.find(b => b.type === 'toolUse') as ToolUseBlock;
+    const toolResult = subBlocks.find(b => b.type === 'toolResult') as ToolResultBlock;
+    expect(toolUse).toMatchObject({ toolUseId: 't-sub-1', collapsed: true });
+    expect(toolResult).toMatchObject({ toolUseId: 't-sub-1', content: 'sub ok' });
+
+    // The late result must NOT have leaked into the root frame.
+    const assistant = state.messages.find(m => m.role === 'assistant')!;
+    expect(assistant.blocks.some(b => b.type === 'toolResult')).toBe(false);
+  });
+
+  it('does not mis-attribute a tool_result with an unknown subagentTaskId to the running subagent', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [
+      turnStart('srv-u1'),
+      { type: 'subagent_started', taskId: 'sub-1', description: 'work', toolUseId: 'tu-x' },
+      { type: 'tool_use', toolName: 'Grep', toolUseId: 't-sub-1', input: { q: 'x' }, isSubagent: true, subagentTaskId: 'sub-1' },
+    ]);
+
+    const before = state;
+    const after = applyEvents(state, [
+      { type: 'tool_result', toolUseId: 't-other', summary: 'not yours', isSubagent: true, subagentTaskId: 'sub-unknown' },
+    ]);
+
+    expect(after).toBe(before);
+    const sub = getSubBlock(after);
+    expect(sub.messages.flatMap(m => m.blocks).some(b => b.type === 'toolResult')).toBe(false);
+  });
+
+  it('propagates isError from the tool_result event', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [
+      turnStart('srv-u1'),
+      { type: 'tool_use', toolName: 'Read', toolUseId: 't1', input: { path: '/x' }, isSubagent: false },
+      { type: 'tool_result', toolUseId: 't1', summary: 'boom', isSubagent: false, isError: true },
+    ]);
+    const assistant = state.messages.find(m => m.role === 'assistant')!;
+    const toolResult = assistant.blocks.find(b => b.type === 'toolResult') as ToolResultBlock;
+    expect(toolResult).toMatchObject({ toolUseId: 't1', content: 'boom', isError: true });
   });
 });
 
@@ -378,6 +439,22 @@ describe('messageReducer — error mid-stream', () => {
     const assistant = state.messages.find(m => m.role === 'assistant')!;
     expect(assistant.isStreaming).toBe(false);
     expect(assistant.blocks[0]).toMatchObject({ type: 'text', text: 'partial', isStreaming: false });
+  });
+
+  it('clears activeSubagents so an aborted turn does not leak them forward', () => {
+    // Registry entries outlive `subagent_completed` now, and only end-of-turn
+    // clears them. Stop/abort dispatches `error`, never `result`.
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [
+      turnStart('srv-u1'),
+      { type: 'subagent_started', taskId: 'sub-1', description: 'd', toolUseId: 'tu1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'done' },
+    ]);
+    expect(state.activeSubagents.size).toBe(1);
+
+    state = applyEvents(state, [{ type: 'error', error: 'aborted', code: 'ABORTED' }]);
+    expect(state.activeSubagents.size).toBe(0);
   });
 });
 

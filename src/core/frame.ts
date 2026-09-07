@@ -43,10 +43,17 @@ function getActiveSubagent(state: ChatState): SubagentState | null {
   return running.length > 0 ? running[running.length - 1] : null;
 }
 
+/**
+ * An explicit `subagentTaskId` is never guessed: when the event names a subagent
+ * we don't know, we drop it rather than attribute it to someone else — a silent
+ * loss beats a confident lie in the UI. The `getActiveSubagent` fallback exists
+ * only for events with NO `subagentTaskId`, which agent-adapters emits as
+ * documented graceful degradation (`isSubagent: true` deltas that arrive before
+ * the corresponding `task_started`).
+ */
 function resolveSubagent(state: ChatState, subagentTaskId?: string): SubagentState | null {
   if (subagentTaskId) {
-    const byId = state.activeSubagents.get(subagentTaskId);
-    if (byId) return byId;
+    return state.activeSubagents.get(subagentTaskId) ?? null;
   }
   return getActiveSubagent(state);
 }
@@ -82,19 +89,29 @@ export function withFrame(
   if (!sub) return state;
   if (state.activeAssistantMessageId === null) return state;
 
-  return {
-    ...state,
-    messages: state.messages.map(msg => {
-      if (msg.id !== state.activeAssistantMessageId) return msg;
-      const blocks = msg.blocks.map(b => {
-        if (b.type !== 'subagent' || b.taskId !== sub.taskId) return b;
-        const out = fn(getSubagentFrame(b.messages));
-        if (out.messages === b.messages) return b;
-        return { ...b, messages: out.messages };
-      });
-      return blocks === msg.blocks ? msg : { ...msg, blocks };
-    }),
-  };
+  // Identity is tracked with explicit flags at both levels: `.map` always
+  // allocates, so comparing the resulting arrays to the originals would make
+  // both guards dead and rebuild the whole message list even when `fn` changed
+  // nothing. No handler currently returns an unchanged frame, so this is an
+  // invariant for future ones rather than a live optimization — but a reducer
+  // that silently breaks referential equality is a memoization trap.
+  let messagesChanged = false;
+  const messages = state.messages.map(msg => {
+    if (msg.id !== state.activeAssistantMessageId) return msg;
+    let blocksChanged = false;
+    const blocks = msg.blocks.map(b => {
+      if (b.type !== 'subagent' || b.taskId !== sub.taskId) return b;
+      const out = fn(getSubagentFrame(b.messages));
+      if (out.messages === b.messages) return b;
+      blocksChanged = true;
+      return { ...b, messages: out.messages };
+    });
+    if (!blocksChanged) return msg;
+    messagesChanged = true;
+    return { ...msg, blocks };
+  });
+
+  return messagesChanged ? { ...state, messages } : state;
 }
 
 /**

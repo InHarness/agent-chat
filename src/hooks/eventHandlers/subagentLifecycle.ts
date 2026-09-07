@@ -46,8 +46,24 @@ export function handleSubagentProgress(state: ChatState, event: SubagentProgress
 }
 
 export function handleSubagentCompleted(state: ChatState, event: SubagentCompletedEvent): ChatState {
+  // The registry entry SURVIVES completion, flipped out of 'running'. The adapter's
+  // content channel (tool_use/tool_result) and lifecycle channel (subagent_completed)
+  // are unordered, so a subagent's results can still arrive after it reports done —
+  // deleting the entry here made those late events either vanish or land in another
+  // subagent's panel via the `getActiveSubagent` fallback. `result.ts` clears the whole
+  // map at end of turn, so it can't grow unbounded.
+  const sub = state.activeSubagents.get(event.taskId);
   const newSubagents = new Map(state.activeSubagents);
-  newSubagents.delete(event.taskId);
+  if (sub) {
+    newSubagents.set(event.taskId, {
+      ...sub,
+      // Wire `status` is an open string; SubagentState's is a union. Anything that
+      // isn't an explicit failure counts as completed — what matters is that it is
+      // no longer 'running', so the fallback keeps excluding it.
+      status: event.status === 'failed' ? 'failed' : 'completed',
+      summary: event.summary,
+    });
+  }
 
   return updateActiveMessage(
     { ...state, activeSubagents: newSubagents },

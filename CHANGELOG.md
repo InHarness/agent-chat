@@ -2,6 +2,18 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.3.2] — 2026-09-04
+
+### Fixed
+- Subagent events arriving **after** `subagent_completed` are no longer lost or mis-attributed. `@inharness-ai/agent-adapters` emits the content channel (`tool_use` / `tool_result`) and the lifecycle channel (`subagent_completed`) without ordering between them, so a subagent can report completion while its results are still streaming. The reducer used to delete the registry entry on completion, which left late `tool_result`s either dropped (the tool card in the panel spun forever until an `F5` rehydrated it from the DB) or routed into a *different* running subagent's panel. The entry now survives completion with its status flipped to `completed` / `failed`, so late events still resolve to the right panel; the registry is still cleared wholesale at end of turn.
+- An event carrying an **unknown** explicit `subagentTaskId` is now dropped instead of falling back to "the last running subagent". The fallback applies only to events with no `subagentTaskId` at all (the adapter's documented graceful degradation for deltas that precede their `task_started`).
+- Tool errors render red live instead of only after a refresh: `WireEvent`'s `tool_result` variant now declares `isError?: boolean` and the handler forwards it rather than hardcoding `false`.
+- Tool errors also survive a refresh. The server-side block reducer built `toolResult` blocks without `isError`, so a failed tool was persisted as a success: after `F5` its card rendered green, and `historyBuilder` replayed it to the model as `[tool-result: N chars, ok]`. Both the root and the nested-subagent paths now write the flag.
+- The server-side block reducer applies the same "never guess an unknown `subagentTaskId`" rule as the client reducer. The two disagreeing meant a mis-addressed event was dropped live but filed under whichever subagent happened to be running when persisted — so a refresh could add a tool card to a panel that never showed one.
+- A turn ending in `error` (including Stop/abort, which dispatches `{ type: 'error', code: 'ABORTED' }`) now clears `activeSubagents`. Only `result` did, and registry entries outlive completion as of this release, so an aborted turn's subagents leaked into every turn that followed.
+- `withFrame` preserves referential equality of `state.messages` when a subagent event changes nothing. The previous guards compared arrays produced by `.map`, which never match, so they could never fire. No current handler returns an unchanged frame, so this is an invariant for future ones rather than a live fix.
+- Adapter errors that arrive as plain objects rather than `Error` instances no longer serialize to `"[object Object]"`; `serialize.ts` falls back to `name` before stringifying.
+
 ## [0.3.1] — 2026-06-14
 
 ### Added
