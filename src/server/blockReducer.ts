@@ -11,15 +11,25 @@ function findActiveSubagentBlock(blocks: StoredContentBlock[]): SubagentBlock | 
   return undefined;
 }
 
+/**
+ * Mirrors `resolveSubagent` in `src/core/frame.ts` — the two reducers MUST agree,
+ * or the transcript rendered live and the one rehydrated after a refresh diverge.
+ *
+ * An explicit `subagentTaskId` is never guessed: when the event names a subagent
+ * we have no block for, we drop it rather than attribute it to whichever panel
+ * happens to be running. The `findActiveSubagentBlock` fallback exists only for
+ * events with NO `subagentTaskId`, which agent-adapters emits as documented
+ * graceful degradation (`isSubagent: true` deltas that arrive before the
+ * corresponding `subagent_started`).
+ */
 function resolveSubagentBlock(
   blocks: StoredContentBlock[],
   subagentTaskId: string | undefined,
 ): SubagentBlock | undefined {
   if (subagentTaskId) {
-    const byId = blocks.find(b => b.type === 'subagent' && b.taskId === subagentTaskId) as
+    return blocks.find(b => b.type === 'subagent' && b.taskId === subagentTaskId) as
       | SubagentBlock
       | undefined;
-    if (byId) return byId;
   }
   return findActiveSubagentBlock(blocks);
 }
@@ -119,10 +129,10 @@ export function applyEventToStoredBlocks(
     case 'tool_result': {
       if (event.isSubagent) {
         const sub = resolveSubagentBlock(blocks, event.subagentTaskId);
-        if (sub) appendToSubagentMessages(sub, { type: 'toolResult', toolUseId: event.toolUseId, content: event.summary });
+        if (sub) appendToSubagentMessages(sub, { type: 'toolResult', toolUseId: event.toolUseId, content: event.summary, isError: event.isError ?? false });
         return;
       }
-      blocks.push({ type: 'toolResult', toolUseId: event.toolUseId, content: event.summary });
+      blocks.push({ type: 'toolResult', toolUseId: event.toolUseId, content: event.summary, isError: event.isError ?? false });
       return;
     }
     case 'subagent_started': {

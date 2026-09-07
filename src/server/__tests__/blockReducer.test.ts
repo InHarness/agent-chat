@@ -161,7 +161,39 @@ describe('applyEventToStoredBlocks — tool_use / tool_result', () => {
     applyAll(blocks, [
       { type: 'tool_result', toolUseId: 't1', summary: 'ok', isSubagent: false },
     ]);
-    expect(blocks).toEqual([{ type: 'toolResult', toolUseId: 't1', content: 'ok' }]);
+    expect(blocks).toEqual([{ type: 'toolResult', toolUseId: 't1', content: 'ok', isError: false }]);
+  });
+
+  it('persists isError so a failed tool stays red after a refresh', () => {
+    const blocks: StoredContentBlock[] = [];
+    applyAll(blocks, [
+      { type: 'tool_result', toolUseId: 't1', summary: 'boom', isSubagent: false, isError: true },
+    ]);
+    expect(blocks).toEqual([{ type: 'toolResult', toolUseId: 't1', content: 'boom', isError: true }]);
+  });
+
+  it('persists isError for a tool_result inside a subagent', () => {
+    const blocks: StoredContentBlock[] = [];
+    applyAll(blocks, [
+      { type: 'subagent_started', taskId: 'sub-1', description: 'd', toolUseId: 'tu1' },
+      { type: 'tool_result', toolUseId: 't1', summary: 'boom', isSubagent: true, subagentTaskId: 'sub-1', isError: true },
+    ]);
+    const sub = blocks[0] as SubagentBlock;
+    expect(sub.messages[0].blocks[0]).toEqual({
+      type: 'toolResult', toolUseId: 't1', content: 'boom', isError: true,
+    });
+  });
+
+  it('never attributes an explicit-but-unknown subagentTaskId to the running subagent', () => {
+    // Same rule as `resolveSubagent` in core/frame.ts. Without it the client
+    // drops this event while the server files it under sub-1, so the panel gains
+    // a tool card after F5 that was never there live.
+    const blocks: StoredContentBlock[] = [];
+    applyAll(blocks, [
+      { type: 'subagent_started', taskId: 'sub-1', description: 'd', toolUseId: 'tu1' },
+      { type: 'tool_result', toolUseId: 't1', summary: 'stray', isSubagent: true, subagentTaskId: 'sub-unknown' },
+    ]);
+    expect((blocks[0] as SubagentBlock).messages).toEqual([]);
   });
 
   it('drops subagent tool_use when no matching subagent exists (no crash)', () => {

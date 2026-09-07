@@ -440,6 +440,22 @@ describe('messageReducer — error mid-stream', () => {
     expect(assistant.isStreaming).toBe(false);
     expect(assistant.blocks[0]).toMatchObject({ type: 'text', text: 'partial', isStreaming: false });
   });
+
+  it('clears activeSubagents so an aborted turn does not leak them forward', () => {
+    // Registry entries outlive `subagent_completed` now, and only end-of-turn
+    // clears them. Stop/abort dispatches `error`, never `result`.
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [
+      turnStart('srv-u1'),
+      { type: 'subagent_started', taskId: 'sub-1', description: 'd', toolUseId: 'tu1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'done' },
+    ]);
+    expect(state.activeSubagents.size).toBe(1);
+
+    state = applyEvents(state, [{ type: 'error', error: 'aborted', code: 'ABORTED' }]);
+    expect(state.activeSubagents.size).toBe(0);
+  });
 });
 
 // --- Coverage extras: cheap branches not in the 8 mandatory scenarios. ---

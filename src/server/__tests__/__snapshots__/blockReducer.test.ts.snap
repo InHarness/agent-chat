@@ -16,6 +16,7 @@ exports[`applyEventToStoredBlocks — golden path snapshot > produces stable blo
   },
   {
     "content": "ok",
+    "isError": false,
     "toolUseId": "t1",
     "type": "toolResult",
   },
@@ -43,6 +44,7 @@ exports[`applyEventToStoredBlocks — subagent lifecycle snapshot > produces sta
           },
           {
             "content": "sub ok",
+            "isError": false,
             "toolUseId": "t-sub-1",
             "type": "toolResult",
           },
