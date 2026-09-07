@@ -2,6 +2,13 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.3.2] — 2026-09-04
+
+### Fixed
+- Subagent events arriving **after** `subagent_completed` are no longer lost or mis-attributed. `@inharness-ai/agent-adapters` emits the content channel (`tool_use` / `tool_result`) and the lifecycle channel (`subagent_completed`) without ordering between them, so a subagent can report completion while its results are still streaming. The reducer used to delete the registry entry on completion, which left late `tool_result`s either dropped (the tool card in the panel spun forever until an `F5` rehydrated it from the DB) or routed into a *different* running subagent's panel. The entry now survives completion with its status flipped to `completed` / `failed`, so late events still resolve to the right panel; the registry is still cleared wholesale at end of turn.
+- An event carrying an **unknown** explicit `subagentTaskId` is now dropped instead of falling back to "the last running subagent". The fallback applies only to events with no `subagentTaskId` at all (the adapter's documented graceful degradation for deltas that precede their `task_started`).
+- Tool errors render red live instead of only after a refresh: `WireEvent`'s `tool_result` variant now declares `isError?: boolean` and the handler forwards it rather than hardcoding `false`.
+
 ## [0.3.1] — 2026-06-14
 
 ### Added

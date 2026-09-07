@@ -90,3 +90,13 @@ export function makeUserInputRequest(requestId: string): UserInputRequest {
     questions: [{ question: 'Continue?', options: [{ label: 'yes' }, { label: 'no' }] }],
   };
 }
+
+// The adapter's content and lifecycle channels are unordered: a subagent can
+// report completion while its tool results are still in flight. The late
+// tool_result must still close the card in ITS panel.
+export const subagentLateToolResultEvents: WireEvent[] = [
+  { type: 'subagent_started', taskId: 'sub-1', description: 'doing it', toolUseId: 'tu-sub1' },
+  { type: 'tool_use', toolName: 'Grep', toolUseId: 't-sub-1', input: { q: 'x' }, isSubagent: true, subagentTaskId: 'sub-1' },
+  { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'sub done' },
+  { type: 'tool_result', toolUseId: 't-sub-1', summary: 'sub ok', isSubagent: true, subagentTaskId: 'sub-1' },
+];

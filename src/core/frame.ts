@@ -43,10 +43,17 @@ function getActiveSubagent(state: ChatState): SubagentState | null {
   return running.length > 0 ? running[running.length - 1] : null;
 }
 
+/**
+ * An explicit `subagentTaskId` is never guessed: when the event names a subagent
+ * we don't know, we drop it rather than attribute it to someone else — a silent
+ * loss beats a confident lie in the UI. The `getActiveSubagent` fallback exists
+ * only for events with NO `subagentTaskId`, which agent-adapters emits as
+ * documented graceful degradation (`isSubagent: true` deltas that arrive before
+ * the corresponding `task_started`).
+ */
 function resolveSubagent(state: ChatState, subagentTaskId?: string): SubagentState | null {
   if (subagentTaskId) {
-    const byId = state.activeSubagents.get(subagentTaskId);
-    if (byId) return byId;
+    return state.activeSubagents.get(subagentTaskId) ?? null;
   }
   return getActiveSubagent(state);
 }

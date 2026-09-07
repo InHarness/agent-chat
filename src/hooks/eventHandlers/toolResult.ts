@@ -17,7 +17,7 @@ export function handleToolResult(state: ChatState, event: ToolResultEvent): Chat
         type: 'toolResult' as const,
         toolUseId: event.toolUseId,
         content: event.summary,
-        isError: false,
+        isError: event.isError ?? false,
         collapsed: true,
       }];
     }),
