@@ -22,14 +22,28 @@ function findActiveSubagentBlock(blocks: StoredContentBlock[]): SubagentBlock | 
  * graceful degradation (`isSubagent: true` deltas that arrive before the
  * corresponding `subagent_started`).
  */
+/**
+ * The LAST subagent block for `taskId`. A re-entered subagent resumes its block
+ * instead of pushing another, so there is normally one; older persisted data may
+ * hold duplicates, and the newest is the one still receiving events.
+ */
+function findSubagentBlockByTaskId(
+  blocks: StoredContentBlock[],
+  taskId: string,
+): SubagentBlock | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.type === 'subagent' && b.taskId === taskId) return b as SubagentBlock;
+  }
+  return undefined;
+}
+
 function resolveSubagentBlock(
   blocks: StoredContentBlock[],
   subagentTaskId: string | undefined,
 ): SubagentBlock | undefined {
   if (subagentTaskId) {
-    return blocks.find(b => b.type === 'subagent' && b.taskId === subagentTaskId) as
-      | SubagentBlock
-      | undefined;
+    return findSubagentBlockByTaskId(blocks, subagentTaskId);
   }
   return findActiveSubagentBlock(blocks);
 }
@@ -136,11 +150,21 @@ export function applyEventToStoredBlocks(
       return;
     }
     case 'subagent_started': {
+      // Re-entry (agent-adapters ≥0.9.12, `resumed: true`): same `taskId`, another
+      // cycle. Resume the existing block — mirrors `handleSubagentStarted` — keeping
+      // its original `toolUseId` so it stays paired with the spawning tool card.
+      const existing = findSubagentBlockByTaskId(blocks, event.taskId);
+      if (existing) {
+        existing.status = 'running';
+        existing.description = event.description;
+        delete existing.summary;
+        return;
+      }
       blocks.push({ type: 'subagent', taskId: event.taskId, toolUseId: event.toolUseId ?? '', description: event.description, status: 'running', messages: [] });
       return;
     }
     case 'subagent_completed': {
-      const sub = blocks.find(b => b.type === 'subagent' && b.taskId === event.taskId) as SubagentBlock | undefined;
+      const sub = findSubagentBlockByTaskId(blocks, event.taskId);
       if (sub) {
         sub.status = event.status;
         sub.summary = event.summary;

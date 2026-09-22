@@ -2,6 +2,16 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.3.3] — 2026-09-22
+
+### Fixed
+- Re-entered subagents no longer spawn a duplicate panel. Since `@inharness-ai/agent-adapters` 0.9.12 a subagent resumed via `SendMessage` opens another lifecycle cycle under the **same** `taskId`: a second `subagent_started` (with `resumed: true`) followed by its own `subagent_completed`. Both reducers (client `handleSubagentStarted` and server `applyEventToStoredBlocks`) now resume the existing block in the current turn — status back to `running`, summary cleared, original `toolUseId` kept so the panel stays paired with the tool card that spawned the agent — instead of appending a second block. The last `subagent_completed` for the `taskId` is the one that sticks. A re-entry in a later turn still opens a fresh panel in that turn's message.
+- Subagent content, completion and lookups by `taskId` target the **last** subagent block with that id (client `withFrame` / `handleSubagentCompleted`, server `resolveSubagentBlock` / `subagent_completed`), so older persisted threads that already hold duplicate blocks route events into exactly one panel.
+
+### Changed
+- `WireEvent`'s `subagent_started` variant declares `resumed?: boolean`.
+- Widened the `@inharness-ai/agent-adapters` dependency from `^0.8.0` to `^0.9.0`, so a consuming app on 0.9.x loads a single copy of the library.
+
 ## [0.3.2] — 2026-09-04
 
 ### Fixed

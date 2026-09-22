@@ -292,6 +292,64 @@ describe('messageReducer — subagent lifecycle', () => {
   });
 });
 
+describe('messageReducer — subagent re-entry (resumed)', () => {
+  function subBlocks(state: ChatState): SubagentBlock[] {
+    return state.messages.find(m => m.role === 'assistant')!
+      .blocks.filter(b => b.type === 'subagent') as SubagentBlock[];
+  }
+
+  it('resumes the existing panel on a second subagent_started for the same taskId', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [
+      turnStart('srv-u1'),
+      { type: 'subagent_started', taskId: 'sub-1', description: 'first', toolUseId: 'tu-spawn' },
+      { type: 'text_delta', text: 'cycle one', isSubagent: true, subagentTaskId: 'sub-1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'first done' },
+      { type: 'subagent_started', taskId: 'sub-1', description: 'again', toolUseId: 'tu-send', resumed: true },
+    ]);
+
+    let subs = subBlocks(state);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]).toMatchObject({ status: 'running', description: 'again', toolUseId: 'tu-spawn' });
+    expect(subs[0].summary).toBeUndefined();
+    expect(state.activeSubagents.get('sub-1')).toMatchObject({ status: 'running', toolUseId: 'tu-spawn' });
+
+    state = applyEvents(state, [
+      { type: 'tool_use', toolName: 'Grep', toolUseId: 't-2', input: {}, isSubagent: true, subagentTaskId: 'sub-1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'second done' },
+    ]);
+
+    subs = subBlocks(state);
+    expect(subs).toHaveLength(1);
+    // The LAST completion is the terminator.
+    expect(subs[0]).toMatchObject({ status: 'completed', summary: 'second done' });
+    const nested = subs[0].messages.flatMap(m => m.blocks);
+    expect(nested.some(b => b.type === 'text' && b.text === 'cycle one')).toBe(true);
+    expect(nested.some(b => b.type === 'toolUse' && b.toolUseId === 't-2')).toBe(true);
+  });
+
+  it('opens a fresh panel when the re-entry lands in a later turn', () => {
+    let state = init();
+    state = applyUserMessage(state, 'hi');
+    state = applyEvents(state, [
+      turnStart('srv-u1', 'srv-a1'),
+      { type: 'subagent_started', taskId: 'sub-1', description: 'first', toolUseId: 'tu-spawn' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'first done' },
+      { type: 'result', output: '', usage: { inputTokens: 1, outputTokens: 1 }, contextSize: 1 },
+    ]);
+    state = applyUserMessage(state, 'continue');
+    state = applyEvents(state, [
+      turnStart('srv-u2', 'srv-a2'),
+      { type: 'subagent_started', taskId: 'sub-1', description: 'again', toolUseId: 'tu-send', resumed: true },
+    ]);
+
+    const [first, second] = state.messages.filter(m => m.role === 'assistant');
+    expect(first.blocks.find(b => b.type === 'subagent')).toMatchObject({ status: 'completed', summary: 'first done' });
+    expect(second.blocks.find(b => b.type === 'subagent')).toMatchObject({ status: 'running', toolUseId: 'tu-send' });
+  });
+});
+
 describe('messageReducer — late and mis-addressed subagent tool_result', () => {
   function getSubBlock(state: ChatState): SubagentBlock {
     return state.messages.find(m => m.role === 'assistant')!

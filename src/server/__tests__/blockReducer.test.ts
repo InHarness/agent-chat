@@ -270,6 +270,48 @@ describe('applyEventToStoredBlocks — subagent lifecycle', () => {
   });
 });
 
+describe('applyEventToStoredBlocks — subagent re-entry (resumed)', () => {
+  it('a resumed subagent_started resumes the existing block instead of pushing another', () => {
+    const blocks: StoredContentBlock[] = [];
+    applyAll(blocks, [
+      { type: 'subagent_started', taskId: 'sub-1', description: 'first', toolUseId: 'tu-spawn' },
+      { type: 'text_delta', text: 'cycle one', isSubagent: true, subagentTaskId: 'sub-1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'first done' },
+      { type: 'subagent_started', taskId: 'sub-1', description: 'again', toolUseId: 'tu-send', resumed: true },
+    ]);
+    expect(blocks).toHaveLength(1);
+    const sub = blocks[0] as SubagentBlock;
+    expect(sub).toMatchObject({ status: 'running', description: 'again', toolUseId: 'tu-spawn' });
+    expect(sub.summary).toBeUndefined();
+
+    applyAll(blocks, [
+      { type: 'tool_use', toolName: 'Grep', toolUseId: 't-2', input: {}, isSubagent: true, subagentTaskId: 'sub-1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'second done', usage: { inputTokens: 3, outputTokens: 4 } },
+    ]);
+    expect(blocks).toHaveLength(1);
+    // The LAST completion is the terminator.
+    expect(sub).toMatchObject({ status: 'completed', summary: 'second done', usage: { inputTokens: 3, outputTokens: 4 } });
+    const nested = sub.messages.flatMap(m => m.blocks);
+    expect(nested.some(b => b.type === 'text' && b.text === 'cycle one')).toBe(true);
+    expect(nested.some(b => b.type === 'toolUse' && b.toolUseId === 't-2')).toBe(true);
+  });
+
+  it('routes content and completion to the LAST block when duplicates exist (older persisted data)', () => {
+    const blocks: StoredContentBlock[] = [
+      { type: 'subagent', taskId: 'sub-1', toolUseId: 'tu1', description: 'old', status: 'completed', summary: 'old done', messages: [] },
+      { type: 'subagent', taskId: 'sub-1', toolUseId: 'tu2', description: 'new', status: 'running', messages: [] },
+    ];
+    applyAll(blocks, [
+      { type: 'text_delta', text: 'hello', isSubagent: true, subagentTaskId: 'sub-1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'failed', summary: 'boom' },
+    ]);
+    const [older, newer] = blocks as SubagentBlock[];
+    expect(older).toMatchObject({ status: 'completed', summary: 'old done', messages: [] });
+    expect(newer).toMatchObject({ status: 'failed', summary: 'boom' });
+    expect(newer.messages).toHaveLength(1);
+  });
+});
+
 describe('applyEventToStoredBlocks — todo_list_updated', () => {
   it('two consecutive root events → upserts (replaces items)', () => {
     const blocks: StoredContentBlock[] = [];

@@ -1,19 +1,41 @@
-import type { ChatState } from '../../types.js';
+import type { ChatState, UIContentBlock } from '../../types.js';
 import type { WireEvent } from '../../server/protocol.js';
 import { updateActiveMessage } from './_shared.js';
 
 type SubagentStartedEvent = Extract<WireEvent, { type: 'subagent_started' }>;
 type SubagentProgressEvent = Extract<WireEvent, { type: 'subagent_progress' }>;
 type SubagentCompletedEvent = Extract<WireEvent, { type: 'subagent_completed' }>;
+type SubagentBlock = Extract<UIContentBlock, { type: 'subagent' }>;
 
 export function handleSubagentStarted(state: ChatState, event: SubagentStartedEvent): ChatState {
+  // Re-entry (agent-adapters ≥0.9.12): a subagent resumed via `SendMessage` opens
+  // another lifecycle cycle under the SAME `taskId`. Its panel is the one already in
+  // the active message — flip it back to 'running' instead of appending a second
+  // block. The block keeps its ORIGINAL `toolUseId`, so the panel stays paired with
+  // the tool card that spawned the agent. Matching is scoped to the active message:
+  // a re-entry in a later turn has no block here and opens a fresh panel.
+  const active = state.messages.find(m => m.id === state.activeAssistantMessageId);
+  const existingIdx = active ? lastSubagentIndex(active.blocks, event.taskId) : -1;
+  const existing = existingIdx >= 0 ? active!.blocks[existingIdx] as SubagentBlock : undefined;
+
   const newSubagents = new Map(state.activeSubagents);
   newSubagents.set(event.taskId, {
     taskId: event.taskId,
     description: event.description,
-    toolUseId: event.toolUseId,
+    toolUseId: existing ? existing.toolUseId : event.toolUseId,
     status: 'running',
   });
+
+  if (existing) {
+    return updateActiveMessage(
+      { ...state, activeSubagents: newSubagents },
+      (blocks) => blocks.map((b, i) =>
+        i === existingIdx
+          ? { ...existing, description: event.description, status: 'running', summary: undefined }
+          : b
+      ),
+    );
+  }
 
   return updateActiveMessage(
     { ...state, activeSubagents: newSubagents },
@@ -26,6 +48,15 @@ export function handleSubagentStarted(state: ChatState, event: SubagentStartedEv
       messages: [],
     }],
   );
+}
+
+/** Index of the LAST subagent block for `taskId` (-1 when none). */
+function lastSubagentIndex(blocks: UIContentBlock[], taskId: string): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.type === 'subagent' && b.taskId === taskId) return i;
+  }
+  return -1;
 }
 
 export function handleSubagentProgress(state: ChatState, event: SubagentProgressEvent): ChatState {
@@ -65,12 +96,17 @@ export function handleSubagentCompleted(state: ChatState, event: SubagentComplet
     });
   }
 
+  // A re-entered subagent closes each cycle separately; the block is shared across
+  // cycles, so every completion overwrites it and the LAST one is what stays.
   return updateActiveMessage(
     { ...state, activeSubagents: newSubagents },
-    (blocks) => blocks.map(b =>
-      b.type === 'subagent' && b.taskId === event.taskId
-        ? { ...b, status: event.status, summary: event.summary, usage: event.usage }
-        : b
-    ),
+    (blocks) => {
+      const idx = lastSubagentIndex(blocks, event.taskId);
+      return blocks.map((b, i) =>
+        i === idx && b.type === 'subagent'
+          ? { ...b, status: event.status, summary: event.summary, usage: event.usage }
+          : b
+      );
+    },
   );
 }

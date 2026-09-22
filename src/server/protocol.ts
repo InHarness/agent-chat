@@ -51,7 +51,9 @@ export type WireEvent =
   | { type: 'tool_result'; toolUseId: string; summary: string; isError?: boolean; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'todo_list_updated'; items: TodoItem[]; source: 'model-tool' | 'session-state'; isSubagent: boolean; subagentTaskId?: string }
   | { type: 'assistant_message'; message: WireNormalizedMessage }
-  | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string }
+  // `resumed: true` marks a re-entered subagent (agent-adapters ≥0.9.12): same
+  // `taskId`, another start/completed cycle. Absent on the first start.
+  | { type: 'subagent_started'; taskId: string; description: string; toolUseId: string; resumed?: boolean }
   | { type: 'subagent_progress'; taskId: string; description: string; lastToolName?: string }
   | { type: 'subagent_completed'; taskId: string; status: string; summary?: string; usage?: WireUsageStats }
   | { type: 'user_input_request'; request: UserInputRequest }
