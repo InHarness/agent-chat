@@ -311,8 +311,8 @@ describe('messageReducer — subagent re-entry (resumed)', () => {
 
     let subs = subBlocks(state);
     expect(subs).toHaveLength(1);
-    expect(subs[0]).toMatchObject({ status: 'running', description: 'again', toolUseId: 'tu-spawn' });
-    expect(subs[0].summary).toBeUndefined();
+    expect(subs[0]).toMatchObject({ status: 'running', description: 'first', toolUseId: 'tu-spawn' });
+    expect(subs[0].summary).toBe('first done');
     expect(state.activeSubagents.get('sub-1')).toMatchObject({ status: 'running', toolUseId: 'tu-spawn' });
 
     state = applyEvents(state, [

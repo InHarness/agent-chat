@@ -12,7 +12,9 @@ export function handleSubagentStarted(state: ChatState, event: SubagentStartedEv
   // another lifecycle cycle under the SAME `taskId`. Its panel is the one already in
   // the active message — flip it back to 'running' instead of appending a second
   // block. The block keeps its ORIGINAL `toolUseId`, so the panel stays paired with
-  // the tool card that spawned the agent. Matching is scoped to the active message:
+  // the tool card that spawned the agent, and its ORIGINAL description (a re-entry's is
+  // the SendMessage text) and summary — a later completion replaces the summary only
+  // when it brings one. Matching is scoped to the active message:
   // a re-entry in a later turn has no block here and opens a fresh panel.
   const active = state.messages.find(m => m.id === state.activeAssistantMessageId);
   const existingIdx = active ? lastSubagentIndex(active.blocks, event.taskId) : -1;
@@ -21,7 +23,7 @@ export function handleSubagentStarted(state: ChatState, event: SubagentStartedEv
   const newSubagents = new Map(state.activeSubagents);
   newSubagents.set(event.taskId, {
     taskId: event.taskId,
-    description: event.description,
+    description: existing ? existing.description : event.description,
     toolUseId: existing ? existing.toolUseId : event.toolUseId,
     status: 'running',
   });
@@ -31,7 +33,7 @@ export function handleSubagentStarted(state: ChatState, event: SubagentStartedEv
       { ...state, activeSubagents: newSubagents },
       (blocks) => blocks.map((b, i) =>
         i === existingIdx
-          ? { ...existing, description: event.description, status: 'running', summary: undefined }
+          ? { ...existing, status: 'running' }
           : b
       ),
     );
@@ -92,7 +94,7 @@ export function handleSubagentCompleted(state: ChatState, event: SubagentComplet
       // isn't an explicit failure counts as completed — what matters is that it is
       // no longer 'running', so the fallback keeps excluding it.
       status: event.status === 'failed' ? 'failed' : 'completed',
-      summary: event.summary,
+      summary: event.summary ?? sub.summary,
     });
   }
 
@@ -104,7 +106,7 @@ export function handleSubagentCompleted(state: ChatState, event: SubagentComplet
       const idx = lastSubagentIndex(blocks, event.taskId);
       return blocks.map((b, i) =>
         i === idx && b.type === 'subagent'
-          ? { ...b, status: event.status, summary: event.summary, usage: event.usage }
+          ? { ...b, status: event.status, summary: event.summary ?? b.summary, usage: event.usage }
           : b
       );
     },

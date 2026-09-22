@@ -271,6 +271,17 @@ describe('applyEventToStoredBlocks — subagent lifecycle', () => {
 });
 
 describe('applyEventToStoredBlocks — subagent re-entry (resumed)', () => {
+  it('a re-entry that completes without a summary keeps the first cycle\'s report', () => {
+    const blocks: StoredContentBlock[] = [];
+    applyAll(blocks, [
+      { type: 'subagent_started', taskId: 'sub-1', description: 'first', toolUseId: 'tu-spawn' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'first done' },
+      { type: 'subagent_started', taskId: 'sub-1', description: 'again', toolUseId: 'tu-send', resumed: true },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'failed' },
+    ]);
+    expect(blocks[0]).toMatchObject({ status: 'failed', description: 'first', summary: 'first done' });
+  });
+
   it('a resumed subagent_started resumes the existing block instead of pushing another', () => {
     const blocks: StoredContentBlock[] = [];
     applyAll(blocks, [
@@ -281,8 +292,8 @@ describe('applyEventToStoredBlocks — subagent re-entry (resumed)', () => {
     ]);
     expect(blocks).toHaveLength(1);
     const sub = blocks[0] as SubagentBlock;
-    expect(sub).toMatchObject({ status: 'running', description: 'again', toolUseId: 'tu-spawn' });
-    expect(sub.summary).toBeUndefined();
+    expect(sub).toMatchObject({ status: 'running', description: 'first', toolUseId: 'tu-spawn' });
+    expect(sub.summary).toBe('first done');
 
     applyAll(blocks, [
       { type: 'tool_use', toolName: 'Grep', toolUseId: 't-2', input: {}, isSubagent: true, subagentTaskId: 'sub-1' },
