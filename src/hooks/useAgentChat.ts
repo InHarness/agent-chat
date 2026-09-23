@@ -67,6 +67,13 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     handleWireEvent({ type: 'error', error: error.message, code: 'NETWORK_ERROR' });
   }, [handleWireEvent]);
 
+  // A dropped connection whose stream already ended on the server: the thread
+  // file on disk is complete, so reload it (if it is still the one on screen).
+  const loadThreadRef = useRef<((threadId: string) => Promise<void>) | null>(null);
+  const onStreamLost = useCallback((threadId: string) => {
+    if (activeThreadIdRef.current === threadId) void loadThreadRef.current?.(threadId);
+  }, []);
+
   const onConnected = useCallback((_requestId: string, threadId: string) => {
     activeThreadIdRef.current = threadId;
     threadHook.setActiveThreadId(threadId);
@@ -80,6 +87,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
     onEvent,
     onError,
     onConnected,
+    onStreamLost,
   });
 
   // Load threads on mount
@@ -174,6 +182,7 @@ export function useAgentChat(chatConfig: AgentChatConfig) {
       await joinStream(threadId);
     }
   }, [threadHook, restoreMessages, agentConfig, advanced, joinStream]);
+  loadThreadRef.current = loadThread;
 
   const deleteThread = useCallback(async (threadId: string) => {
     const { deletedActive } = await threadHook.deleteThread(threadId);

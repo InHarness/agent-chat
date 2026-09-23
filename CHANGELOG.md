@@ -2,6 +2,35 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.4.0] — Unreleased
+
+Adapters that hold the session after handing control back (claude-code via agent-adapters 0.9.13 keeps it open while subagents or background tasks finish, then wakes the model and emits another `result`) now work end to end. The wire frames keep their shape; what changed is what they mean. See "Migrating from the single-`result` contract" in the chat protocol spec (`03-backend/03-chat-protocol.md`).
+
+### Changed — behaviour
+- **`result` closes a block, not the turn.** The reducer no longer tears the stream down on `result`: `isStreaming`, `activeAssistantMessageId` and `activeSubagents` stay as they are, so text after a second `result` is rendered and subagent panels stay open. `result` only adds its `usage`, overwrites `contextSize`, updates `sessionId` when present and closes the open text/thinking blocks.
+- **`done` ends the stream.** `useEventStream` now forwards `done` to `onEvent` instead of swallowing it; the reducer's new `done` handler finalizes the active message and clears `isStreaming`, `activeAssistantMessageId` and `activeSubagents`. `done` and `error` are idempotent — `error` followed by `done` tears down once.
+- An SSE connection that closes without `done` (server crash, proxy cut) is treated as `done`, so the UI no longer stays stuck in streaming. A deliberate `disconnect()` / `abort()` gets no synthetic `done`. With your own transport, dispatch `{ type: 'done' }` when it closes.
+- **A further `turn_start` on the same stream opens a new user/assistant pair.** Previously it could rewrite the ids of the previous pair. Only the first `turn_start` adopts the optimistic pair created by `USER_MESSAGE` (new state field `optimisticAssistantMessageId`).
+- The server emits `queue_updated` **before** `done`, so `done` is always the stream's last frame, in live streams and in replay.
+- After an adapter `error` event only `queue_updated` and `done` follow on the wire, and no queued turn runs on that stream. Messages still queued are handed back with `queue_cleared` (texts for the composer, as on Stop) instead of staying queued with nothing to deliver them. The server still reads the adapter stream to its end — codex reports some runtime errors and carries on — but keeps only a later `result`'s `sessionId`; content and usage the client never saw are not persisted.
+- Client-side errors of a side request (`QUEUE_ERROR` from a failed enqueue, `USER_INPUT_ERROR` from a failed user-input answer) set `error` without tearing down the live stream.
+- Frames that belong inside a turn (content, subagent lifecycle, `result`, …) are dropped by the reducer while no assistant message is active — before the first `turn_start` and after `done` / `error`. A stray `result` no longer moves the hook's `usage` past what the persisted thread holds.
+
+### Fixed
+- An assistant message's `usage` is the sum over every `result` it received — live and persisted. It used to be overwritten by the last `result`, so after a reload the thread's cost was understated.
+- A `result` without `sessionId` no longer erases the session id recorded for the thread.
+- A throw during request setup after the SSE headers were sent (thread lookup, execution plan, thread update) left the stream open with no `done` and the thread locked. It now ends with `error` + `done` like any other failure.
+- Frames an aborted stream produced while it was still unwinding could leak into the thread's next stream once a new `POST /api/chat` took the thread, and its after-turn loop could start a queued turn after Stop. The handler now emits only while its session still owns the thread, and no queued turn runs after Stop. Abort also cancels the thread's pending user-input prompts so the adapter can unwind.
+- An exception thrown by the adapter (rather than emitted as an `error` event) now gets its proper `code` (`ADAPTER_TIMEOUT`, `IDLE_TIMEOUT`, …) instead of always `UNKNOWN`.
+- A connection that drops mid-stream (a network error rather than a clean close) is resumed: the client rejoins `GET /api/chat/stream/:threadId` with `Last-Event-ID`, up to three times with backoff, so only the missed frames are replayed. If the stream has already ended on the server (404), the client delivers `done` and reloads the thread from disk. `useEventStream` gets an `onStreamLost(threadId)` option. It used to surface `NETWORK_ERROR` while the turn went on running on the server.
+- Reloading a thread within 2 s of its stream ending no longer shows the last exchange twice. The join replayed turns that the reload had already restored from disk. A `turn_start` for an assistant message the state already holds is now ignored, along with its frames.
+
+### Internal
+- `accumulateUsage` (in `core/usage.ts`) is the single rule for summing `result` usage, used by the reducer and by server persistence. Stream teardown for `done` / `error` is one shared helper (`teardownStream`).
+
+### Removed
+- `src/server/persistence.ts` (`persistTurn`) — dead code, never exported; threads are written once per stream by `appendMessages()` after `done`.
+
 ## [0.3.4] — 2026-09-23
 
 ### Changed

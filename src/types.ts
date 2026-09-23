@@ -55,9 +55,10 @@ export interface ChatMessage {
   subagentTaskId?: string;
   usage?: UsageStats;
   /**
-   * USAGE CONTEXT WINDOW after this assistant turn — `usage.inputTokens +
-   * usage.outputTokens`. Stored per-message so RESTORE can recover the last
-   * turn's value without recomputing. Optional for backward compatibility
+   * USAGE CONTEXT WINDOW after this message's last `result` frame — a
+   * snapshot, overwritten (never summed); `usage` above is the sum over every
+   * `result`. Stored per-message so RESTORE can recover the current value
+   * without recomputing. Optional for backward compatibility
    * with threads persisted before this field existed.
    */
   contextSize?: number;
@@ -79,15 +80,21 @@ export type UsageStats = WireUsageStats;
 export interface ChatState {
   messages: ChatMessage[];
   activeAssistantMessageId: string | null;
+  /**
+   * Id of the assistant message `USER_MESSAGE` created optimistically, until
+   * the server's first `turn_start` adopts it. A later `turn_start` on the
+   * same stream opens a new pair instead of rewriting a finished one.
+   */
+  optimisticAssistantMessageId: string | null;
   activeSubagents: Map<string, SubagentState>;
   isStreaming: boolean;
   error: Error | null;
   usage: UsageStats | null;
   /**
-   * USAGE CONTEXT WINDOW after the LAST turn — bounded by the model's window.
-   * Overwritten (NOT summed) on every `result` event. Use this to render the
-   * "X / 200k" utilization bar. Distinct from `usage`, which is cumulative
-   * billing across resumed turns and can exceed the window.
+   * USAGE CONTEXT WINDOW after the LAST `result` frame — bounded by the
+   * model's window. Overwritten (NOT summed) on every `result` event. Use this
+   * to render the "X / 200k" utilization bar. Distinct from `usage`, which is
+   * summed over every `result` frame and can exceed the window.
    */
   contextSize: number | null;
   sessionId: string | null;

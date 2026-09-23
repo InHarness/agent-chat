@@ -58,6 +58,7 @@ describe('messageReducer — mid-turn user_message injection', () => {
       // The next delta must land in a NEW assistant message:
       { type: 'text_delta', text: 'on it', isSubagent: false },
       { type: 'result', output: 'done', usage: { inputTokens: 1, outputTokens: 2 }, contextSize: 3 },
+      { type: 'done' },
     ]);
 
     // user(hi) · assistant(working) · user(also do X) · assistant(on it)
@@ -75,7 +76,7 @@ describe('messageReducer — mid-turn user_message injection', () => {
     // The post-injection delta opened and filled a brand-new assistant message.
     expect(secondAssistant.role).toBe('assistant');
     expect(secondAssistant.blocks).toEqual([{ type: 'text', text: 'on it', isStreaming: false }]);
-    expect(secondAssistant.isStreaming).toBe(false); // finalized by result
+    expect(secondAssistant.isStreaming).toBe(false); // finalized by done
     expect(state.activeAssistantMessageId).toBeNull();
     expect(state.contextSize).toBe(3);
   });
@@ -94,7 +95,7 @@ describe('messageReducer — mid-turn user_message injection', () => {
     ]);
 
     expect(state.messages.map(m => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
-    // contextSize reflects the LAST result; usage is summed across turns.
+    // contextSize reflects the LAST result; usage is summed over every result.
     expect(state.contextSize).toBe(8);
     expect(state.usage).toEqual({ inputTokens: 3, outputTokens: 3 });
     expect(state.messages[3].blocks).toEqual([{ type: 'text', text: 'b', isStreaming: false }]);

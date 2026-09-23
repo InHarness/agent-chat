@@ -110,6 +110,17 @@ export class SessionManager {
     if (session) session.sessionId = sessionId;
   }
 
+  /**
+   * `broadcast` on behalf of one specific session: a no-op once that session
+   * no longer owns its thread (it was aborted and a new POST registered). The
+   * chat handler emits through this, so an aborted stream still unwinding
+   * cannot leak frames into the thread's next stream.
+   */
+  broadcastFrom(session: ActiveSession, type: string, data: unknown): BufferedEvent | null {
+    if (this.byThread.get(session.threadId) !== session) return null;
+    return this.broadcast(session.threadId, type, data);
+  }
+
   /** Push an event to all listeners and store it in the replay buffer. */
   broadcast(threadId: string, type: string, data: unknown): BufferedEvent | null {
     const session = this.byThread.get(threadId);
@@ -161,6 +172,10 @@ export class SessionManager {
     if (!threadId) return false;
     const session = this.byThread.get(threadId);
     if (!session) return false;
+    // Release the thread at once: the client considers the stream over the
+    // moment it presses Stop, and an adapter may take long (or forever) to
+    // unwind. Frames the aborted stream still emits go through
+    // `broadcastFrom`, which drops them once a newer session owns the thread.
     session.adapter.abort();
     this.remove(requestId);
     return true;

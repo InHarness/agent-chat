@@ -63,13 +63,12 @@ gives nonsensical UI:
 
 | Field | Type | Aggregation | Use for |
 |---|---|---|---|
-| `usage` | `UsageStats \| null` | **cumulative** across all turns | cost / billing alarms |
-| `contextSize` | `number \| null` | **last turn only** (overwritten) | "X / 200k" utilization bar |
+| `usage` | `UsageStats \| null` | **cumulative** — summed over every `result` frame of every turn | cost / billing alarms |
+| `contextSize` | `number \| null` | **last `result` frame only** (overwritten) | "X / 200k" utilization bar |
 | `contextWindow` | `number \| undefined` | per-model cap from server config | denominator for the bar |
 
-`contextSize === lastTurn.usage.inputTokens + lastTurn.usage.outputTokens`
-(cache fields are a subset of `inputTokens`, never add them on top — that
-was a common bug). To render the bar:
+`contextSize === lastResult.usage.inputTokens + lastResult.usage.outputTokens`
+(cache fields are a subset of `inputTokens`, never add them on top). To render the bar:
 
 ```tsx
 if (contextSize !== null && contextWindow) {
@@ -78,8 +77,7 @@ if (contextSize !== null && contextWindow) {
 }
 ```
 
-To show session billing instead, sum `usage` (already cumulative — just
-read it). Helper `contextSizeOf(usage)` is exported from the package root
+To show session billing instead, read `usage` — it is already the sum. Helper `contextSizeOf(usage)` is exported from the package root
 for callers that only have a `UsageStats` (e.g. from a subagent block).
 - **Architecture & model** — `config`, `configLoading`, `architecture`,
   `model`, `setArchitecture`, `setModel`.
@@ -167,6 +165,44 @@ const [state, dispatch] = useReducer(
 );
 dispatch({ type: 'EVENT', event });
 ```
+
+
+<!-- anchor: p6vmu5cg -->
+### What `result`, `turn_start`, `done` and `error` do to the state
+
+`result` closes a block, a further `turn_start` closes a turn, `done` and `error` close
+the stream (see <section_ref anchor="lqp1a6dx"/>).
+
+| State | on `result` | on a further `turn_start` | on `done` / `error` |
+|---|---|---|---|
+| `messages` | the active message's open text/thinking blocks close; its `usage` grows by the block's | the active message is finalized; a new user/assistant pair is appended | the active message is finalized |
+| `isStreaming` | untouched — stays `true` | untouched — stays `true` | `false` |
+| `activeAssistantMessageId` | untouched | the new assistant message | `null` |
+| `activeSubagents` | untouched — a running subagent is often why the session is held | cleared | cleared |
+| `usage` | grows by the block's | untouched | untouched |
+| `contextSize` | overwritten | untouched | untouched |
+| `sessionId` | overwritten when present | untouched | untouched |
+
+- **Frames arriving while `activeAssistantMessageId` is `null` are dropped.**
+- **Teardown is idempotent.** `error` followed by `done` tears the stream down once.
+- **Side-request errors do not end the stream.** `useAgentChat` dispatches
+  `error` frames itself when an enqueue (`QUEUE_ERROR`) or a user-input answer
+  (`USER_INPUT_ERROR`) fails. Those set `error` only; the live turn keeps
+  streaming.
+- **A replayed turn the thread already holds is ignored.** A `turn_start` whose
+  `assistantMessageId` is already in `messages` (a reload restored it from disk,
+  then a join replayed it) leaves no message active, so its frames are dropped
+  rather than appended a second time.
+- **A transport that dies without `done`.** When `useAgentChat`'s SSE connection
+  closes cleanly without `done`, it tears itself down (a synthetic `done`). When
+  the connection **drops** mid-stream (a network error), it rejoins
+  `GET /api/chat/stream/:threadId` with `Last-Event-ID`, up to three times, so
+  only the missed frames are replayed. If the stream already ended on the server
+  (404), it delivers `done` and reloads the thread from disk. Only if it cannot
+  rejoin does it surface a `NETWORK_ERROR`. `useEventStream` exposes the reload
+  step as its `onStreamLost(threadId)` option. With your own transport, dispatch
+  `{ type: 'EVENT', event: { type: 'done' } }` (or call
+  `reducer.handleWireEvent({ type: 'done' })`) when it closes.
 
 <!-- anchor: a5hks007 -->
 ## Composing bundled components

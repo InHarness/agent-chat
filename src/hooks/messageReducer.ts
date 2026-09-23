@@ -19,6 +19,7 @@ export function createInitialState(architecture: string, model: string): ChatSta
   return {
     messages: [],
     activeAssistantMessageId: null,
+    optimisticAssistantMessageId: null,
     activeSubagents: new Map(),
     isStreaming: false,
     error: null,
@@ -70,6 +71,7 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         ...state,
         messages: [...state.messages, userMsg, assistantMsg],
         activeAssistantMessageId: assistantMsg.id,
+        optimisticAssistantMessageId: assistantMsg.id,
         isStreaming: true,
         error: null,
       };
@@ -98,6 +100,7 @@ export function messageReducer(state: ChatState, action: MessageAction): ChatSta
         ...state,
         messages: action.messages,
         activeAssistantMessageId: null,
+        optimisticAssistantMessageId: null,
         activeSubagents: new Map(),
         isStreaming: false,
         error: null,

@@ -58,6 +58,14 @@ export type WireEvent =
   | { type: 'subagent_completed'; taskId: string; status: string; summary?: string; usage?: WireUsageStats }
   | { type: 'user_input_request'; request: UserInputRequest }
   | { type: 'user_input_response'; requestId: string; response: UserInputResponse }
+  // An assistant BLOCK closed — the adapter handed control back. A turn may
+  // carry several (an adapter that holds the session wakes the model again);
+  // only `done` ends the stream.
+  //   output      — final text of the block that just closed, as reported by
+  //                 the adapter; not necessarily the turn's last text.
+  //   usage       — this block alone. Sum across `result` frames for the cost.
+  //   contextSize — context-window occupancy after this block. Overwrite,
+  //                 never sum: the last `result`'s value is current.
   | { type: 'result'; output: string; usage: WireUsageStats; contextSize: number; sessionId?: string }
   // A queued user message was injected into the live session mid-turn (forward of
   // UnifiedEvent `user_message` from agent-adapters ≥0.7.0). NOTE: the adapter
@@ -163,13 +171,13 @@ export interface StoredMessage {
   timestamp: string;
   /** Task ID when this message belongs to a subagent (mirrors NormalizedMessage.subagentTaskId). */
   subagentTaskId?: string;
-  /** Usage stats for this message's turn (mirrors NormalizedMessage.usage). */
+  /** Usage stats summed over every `result` frame this message received. */
   usage?: WireUsageStats;
   /**
-   * USAGE CONTEXT WINDOW after this turn — total tokens occupying the model's
-   * context window. Equals `usage.inputTokens + usage.outputTokens`. Stored
-   * per-turn so reload (F5) can recover the last turn's value without
-   * recomputing from cumulative billing. Optional: older threads written
+   * USAGE CONTEXT WINDOW after this message's last `result` frame — a
+   * snapshot, overwritten (never summed) by each `result`. Stored per message
+   * so reload (F5) can recover the current value without recomputing from
+   * summed billing. Optional: older threads written
    * before this field existed read back as `undefined` — clients fall back to
    * computing it from `usage` (see `storedMessageToChat`).
    */

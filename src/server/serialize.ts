@@ -73,9 +73,10 @@ export function unifiedEventToWire(event: UnifiedEvent): WireEvent {
   }
 }
 
-function errorToCode(err: unknown): string {
+export function errorToCode(err: unknown): string {
   if (!err || typeof err !== 'object') return 'UNKNOWN';
   const name = (err as { name?: string }).name ?? '';
+  // The run outlived its `timeoutMs` backstop.
   if (name === 'AdapterTimeoutError') return 'ADAPTER_TIMEOUT';
   // Siblings of AdapterTimeoutError, not subclasses (agent-adapters ≥0.9.13):
   // each names a different bound, so each gets its own code.

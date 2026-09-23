@@ -28,6 +28,13 @@ interface StreamOptions {
   onEvent: (event: WireEvent) => void;
   onError: (error: Error) => void;
   onConnected?: (requestId: string, threadId: string) => void;
+  /**
+   * A dropped connection could not be resumed because the stream already
+   * ended on the server (its replay window has closed). The thread on disk
+   * holds the whole stream — reload it. A synthetic `done` has already been
+   * delivered through `onEvent`.
+   */
+  onStreamLost?: (threadId: string) => void;
   endpoints?: StreamEndpoints;
   logger?: Logger;
 }
@@ -38,6 +45,9 @@ const defaultQueue = (threadId: string) =>
   `/api/chat/queue/${encodeURIComponent(threadId)}`;
 const defaultQueueItem = (threadId: string, messageId: string) =>
   `/api/chat/queue/${encodeURIComponent(threadId)}/${encodeURIComponent(messageId)}`;
+
+const MAX_RESUME_ATTEMPTS = 3;
+const RESUME_BACKOFF_MS = 500;
 
 async function consumeSSE(
   response: Response,
@@ -75,6 +85,99 @@ async function consumeSSE(
   }
 }
 
+/**
+ * Where a consumed stream got to — filled in by `consumeWireStream` so a
+ * dropped connection can be resumed from the last frame it delivered.
+ */
+export interface StreamProgress {
+  threadId?: string;
+  lastEventId?: string;
+}
+
+/**
+ * Read one chat SSE response to its end and hand every wire frame to
+ * `onEvent`, `done` included — `done` is the reducer's teardown signal. When
+ * the connection closes without a `done` frame (server crash, proxy cut), a
+ * synthetic `{ type: 'done' }` is delivered so the UI does not stay stuck in
+ * streaming. An abort (`AbortError`) propagates to the caller and gets no
+ * synthetic `done`: a deliberate detach is not the end of the stream.
+ */
+export async function consumeWireStream(
+  response: Response,
+  handlers: {
+    onEvent: (event: WireEvent) => void;
+    onConnected?: (requestId: string, threadId: string) => void;
+    onParseError?: (err: unknown) => void;
+  },
+  progress: StreamProgress = {},
+): Promise<void> {
+  let sawDone = false;
+  await consumeSSE(response, (event, id, data) => {
+    if (id !== null) progress.lastEventId = id;
+    try {
+      const parsed = JSON.parse(data);
+      if (event === 'connected') {
+        progress.threadId = parsed.threadId;
+        handlers.onConnected?.(parsed.requestId, parsed.threadId);
+      } else if (event === 'done') {
+        sawDone = true;
+        handlers.onEvent({ type: 'done' });
+      } else {
+        handlers.onEvent({ type: event, ...parsed } as WireEvent);
+      }
+    } catch (err) {
+      handlers.onParseError?.(err);
+    }
+  });
+  if (!sawDone) handlers.onEvent({ type: 'done' });
+}
+
+/**
+ * Consume a chat SSE response; when the connection drops mid-stream (a network
+ * error — not an abort, not a clean close) rejoin the thread's stream with
+ * `Last-Event-ID`, so the server replays only the frames this client missed.
+ * Retries a few times with backoff. A 404 on rejoin means the stream already
+ * ended and left its replay window: deliver a synthetic `done` and hand the
+ * thread to `onStreamLost` (its file on disk is complete). Throws the original
+ * failure when the stream cannot be resumed, and `AbortError` on abort.
+ */
+export async function consumeWithResume(
+  response: Response,
+  opts: {
+    signal: AbortSignal;
+    handlers: Parameters<typeof consumeWireStream>[1];
+    rejoin: (threadId: string, lastEventId: string | undefined) => Promise<Response>;
+    onStreamLost?: (threadId: string) => void;
+    onDropped?: (err: unknown) => void;
+    backoffMs?: number;
+  },
+): Promise<void> {
+  const progress: StreamProgress = {};
+  const backoffMs = opts.backoffMs ?? RESUME_BACKOFF_MS;
+  let current = response;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await consumeWireStream(current, opts.handlers, progress);
+      return;
+    } catch (err) {
+      if ((err as Error).name === 'AbortError' || opts.signal.aborted) throw err;
+      if (!progress.threadId || attempt >= MAX_RESUME_ATTEMPTS) throw err;
+      opts.onDropped?.(err);
+      await new Promise(r => setTimeout(r, backoffMs * (attempt + 1)));
+      if (opts.signal.aborted) throw new DOMException('Stream aborted', 'AbortError');
+      const next = await opts.rejoin(progress.threadId, progress.lastEventId).catch(() => null);
+      if (opts.signal.aborted) throw new DOMException('Stream aborted', 'AbortError');
+      if (next?.status === 404) {
+        opts.handlers.onEvent({ type: 'done' });
+        opts.onStreamLost?.(progress.threadId);
+        return;
+      }
+      if (!next?.ok) throw err;
+      current = next;
+    }
+  }
+}
+
 export function useEventStream(options: StreamOptions) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef<string | null>(null);
@@ -97,6 +200,31 @@ export function useEventStream(options: StreamOptions) {
     options.endpoints?.queueClear,
   ]);
 
+  const consumeResumable = useCallback((
+    response: Response,
+    controller: AbortController,
+    context: string,
+  ): Promise<void> => consumeWithResume(response, {
+    signal: controller.signal,
+    handlers: {
+      onEvent: options.onEvent,
+      onConnected: (requestId, threadId) => {
+        requestIdRef.current = requestId;
+        options.onConnected?.(requestId, threadId);
+      },
+      onParseError: (err) => logger.warn(`useEventStream.${context}.parse`, err),
+    },
+    rejoin: (threadId, lastEventId) => fetch(`${options.serverUrl}${streamByThread(threadId)}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/event-stream',
+        ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
+      },
+    }),
+    onStreamLost: options.onStreamLost,
+    onDropped: (err) => logger.warn(`useEventStream.${context}.dropped`, err),
+  }), [options.serverUrl, options.onEvent, options.onConnected, options.onStreamLost, streamByThread, logger]);
+
   const startStream = useCallback(async (request: ChatRequest) => {
     // Abort any existing stream (primary request + any piggyback join)
     abortControllerRef.current?.abort();
@@ -118,21 +246,7 @@ export function useEventStream(options: StreamOptions) {
         throw new Error(body.error ?? body.errors?.[0]?.message ?? `HTTP ${response.status}`);
       }
 
-      await consumeSSE(response, (event, _id, data) => {
-        try {
-          const parsed = JSON.parse(data);
-          if (event === 'connected') {
-            requestIdRef.current = parsed.requestId;
-            options.onConnected?.(parsed.requestId, parsed.threadId);
-          } else if (event === 'done') {
-            // Stream complete
-          } else {
-            options.onEvent({ type: event, ...parsed } as WireEvent);
-          }
-        } catch (err) {
-          logger.warn('useEventStream.startStream.parse', err);
-        }
-      });
+      await consumeResumable(response, controller, 'startStream');
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
       options.onError(err as Error);
@@ -142,7 +256,7 @@ export function useEventStream(options: StreamOptions) {
         requestIdRef.current = null;
       }
     }
-  }, [options.serverUrl, options.onEvent, options.onError, options.onConnected, chatPath, logger]);
+  }, [options.serverUrl, options.onError, chatPath, consumeResumable]);
 
   /**
    * Try to join an in-flight stream for the given thread. Returns `true` when
@@ -168,21 +282,7 @@ export function useEventStream(options: StreamOptions) {
         throw new Error(`HTTP ${response.status}`);
       }
       connected = true;
-      await consumeSSE(response, (event, _id, data) => {
-        try {
-          const parsed = JSON.parse(data);
-          if (event === 'connected') {
-            requestIdRef.current = parsed.requestId;
-            options.onConnected?.(parsed.requestId, parsed.threadId);
-          } else if (event === 'done') {
-            // Live stream ended
-          } else {
-            options.onEvent({ type: event, ...parsed } as WireEvent);
-          }
-        } catch (err) {
-          logger.warn('useEventStream.joinStream.parse', err);
-        }
-      });
+      await consumeResumable(response, controller, 'joinStream');
       return true;
     } catch (err) {
       if ((err as Error).name === 'AbortError') return connected;
@@ -193,7 +293,7 @@ export function useEventStream(options: StreamOptions) {
         joinAbortRef.current = null;
       }
     }
-  }, [options.serverUrl, options.onEvent, options.onError, options.onConnected, streamByThread, logger]);
+  }, [options.serverUrl, options.onError, streamByThread, consumeResumable]);
 
   /**
    * Stop the current turn: close the local SSE connection AND tell the server

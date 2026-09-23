@@ -89,14 +89,15 @@ local CLI tool, this is the project root it operates on.
 ### `onEvent?: (event, requestId) => void`
 
 Fired for **every** wire event the server emits, before serialization.
-The `requestId` correlates frames within a single turn. Use it for:
+The `requestId` correlates the frames of a single stream (one
+`POST /api/chat`), which may carry several turns. Use it for:
 
 - structured logging (one log line per event, traceable to the
   `connected` frame's `requestId`);
 - billing metering (catch `result` events, sum `usage.inputTokens` /
-  `usage.outputTokens` — cumulative across resumed turns);
-- context-window metering (catch `result.contextSize` — post-turn
-  utilization, take the LAST turn's value, never sum across turns —
+  `usage.outputTokens` — summed over every `result` — one turn can emit several);
+- context-window metering (catch `result.contextSize` — post-block
+  utilization, take the LAST `result`'s value, never sum —
   bounded by the model's window from `getModelContextWindow()`);
 - redaction or audit (you see `text_delta`, `tool_use`, etc. live).
 

@@ -44,7 +44,7 @@ type TodoListBlock = Extract<UIContentBlock, { type: 'todoList' }>;
 type UserInputRequestBlock = Extract<UIContentBlock, { type: 'userInputRequest' }>;
 
 describe('messageReducer — golden path turn', () => {
-  it('processes USER_MESSAGE → turn_start → text deltas → tool_use → tool_result → result', () => {
+  it('processes USER_MESSAGE → turn_start → text deltas → tool_use → tool_result → result → done', () => {
     let state = init();
     state = applyUserMessage(state, 'hi');
     expect(state.messages).toHaveLength(2);
@@ -337,6 +337,7 @@ describe('messageReducer — subagent re-entry (resumed)', () => {
       { type: 'subagent_started', taskId: 'sub-1', description: 'first', toolUseId: 'tu-spawn' },
       { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'first done' },
       { type: 'result', output: '', usage: { inputTokens: 1, outputTokens: 1 }, contextSize: 1 },
+      { type: 'done' },
     ]);
     state = applyUserMessage(state, 'continue');
     state = applyEvents(state, [
@@ -616,6 +617,7 @@ describe('messageReducer — RESTORE / SET_ARCHITECTURE / SET_MODEL / CLEAR', ()
       turnStart('srv-u2', 'srv-a2', 'again'),
       { type: 'text_delta', text: 'x', isSubagent: false },
       { type: 'result', output: 'done', usage: { inputTokens: 80, outputTokens: 25 }, contextSize: 105 },
+      { type: 'done' },
     ]);
     expect(state.contextSize).toBe(105);
     // Billing is still cumulative — sanity check the two metrics live separately.
@@ -748,14 +750,13 @@ describe('messageReducer — RESTORE / SET_ARCHITECTURE / SET_MODEL / CLEAR', ()
 });
 
 describe('messageReducer — misc no-op events', () => {
-  it('connected, flush, done, assistant_message are pure no-ops', () => {
+  it('connected, flush, assistant_message are pure no-ops', () => {
     let state = init();
     state = applyUserMessage(state, 'hi');
     const before = state;
     const after = applyEvents(state, [
       { type: 'connected', requestId: 'r1' },
       { type: 'flush' },
-      { type: 'done' },
       { type: 'assistant_message', message: { role: 'assistant', content: [], timestamp: FIXED_TS } },
     ]);
     expect(after).toBe(before);
