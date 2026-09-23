@@ -1,22 +1,25 @@
-import { addUsage } from '../../core/usage.js';
+import { accumulateUsage } from '../../core/usage.js';
 import type { ChatState } from '../../types.js';
 import type { WireEvent } from '../../server/protocol.js';
-import { finalizeActiveMessage } from './_shared.js';
+import { closeBlockOnActiveMessage } from './_shared.js';
 
 type ResultEvent = Extract<WireEvent, { type: 'result' }>;
 
+/**
+ * `result` closes a BLOCK, not the turn: an adapter may hold the session,
+ * wake the model and emit another `result` on the same turn. Only the
+ * counters move and the open text/thinking blocks close — the stream stays
+ * armed (`isStreaming`, `activeAssistantMessageId`, `activeSubagents`) until
+ * `done` or `error`.
+ */
 export function handleResult(state: ChatState, event: ResultEvent): ChatState {
   return {
     ...state,
-    isStreaming: false,
-    // BILLING — sumować przez tury (cost). Niegraniczone.
-    usage: state.usage ? addUsage(state.usage, event.usage) : event.usage,
-    // CONTEXT WINDOW — overwrite, nigdy nie sumować. Każda tura zwraca
-    // post-turn context size, bounded by model window.
+    // BILLING — `usage` on a `result` covers that block alone: sum them.
+    usage: accumulateUsage(state.usage ?? undefined, event.usage) ?? null,
+    // CONTEXT WINDOW — a snapshot: overwrite, never sum. The last one is current.
     contextSize: event.contextSize,
     sessionId: event.sessionId ?? state.sessionId,
-    messages: finalizeActiveMessage(state.messages, state.activeAssistantMessageId, event.usage, event.contextSize),
-    activeAssistantMessageId: null,
-    activeSubagents: new Map(),
+    messages: closeBlockOnActiveMessage(state.messages, state.activeAssistantMessageId, event.usage, event.contextSize),
   };
 }

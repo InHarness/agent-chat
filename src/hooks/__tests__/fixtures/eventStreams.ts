@@ -30,7 +30,8 @@ export function turnStart(
   return { type: 'turn_start', userMessageId, assistantMessageId, prompt, timestamp: FIXED_TS };
 }
 
-// Golden path turn. Server picks its own UUIDs that don't match client's optimistic ones.
+// Golden path stream: one turn, one block, closed by `done`. Server picks its
+// own UUIDs that don't match client's optimistic ones.
 export const goldenPathEvents: WireEvent[] = [
   turnStart('srv-u1'),
   { type: 'text_delta', text: 'Hello ', isSubagent: false },
@@ -39,6 +40,21 @@ export const goldenPathEvents: WireEvent[] = [
   { type: 'tool_use', toolName: 'Read', toolUseId: 't1', input: { path: '/x' }, isSubagent: false },
   { type: 'tool_result', toolUseId: 't1', summary: 'ok', isSubagent: false },
   { type: 'result', output: 'done', usage: { inputTokens: 10, outputTokens: 20 }, contextSize: 30 },
+  { type: 'done' },
+];
+
+// A held session: the adapter closes a block with `result`, wakes the model
+// (a subagent finished in the background) and closes a second block — all in
+// ONE turn — before the server ends the stream with `done`.
+export const multiResultTurnEvents: WireEvent[] = [
+  turnStart('srv-u1'),
+  { type: 'text_delta', text: 'Starting a subagent. ', isSubagent: false },
+  { type: 'subagent_started', taskId: 'sub-1', description: 'background work', toolUseId: 'tu-sub1' },
+  { type: 'result', output: 'Starting a subagent. ', usage: { inputTokens: 10, outputTokens: 5 }, contextSize: 15 },
+  { type: 'subagent_completed', taskId: 'sub-1', status: 'completed', summary: 'sub done' },
+  { type: 'text_delta', text: 'Subagent finished.', isSubagent: false },
+  { type: 'result', output: 'Subagent finished.', usage: { inputTokens: 20, outputTokens: 7 }, contextSize: 27 },
+  { type: 'done' },
 ];
 
 // Fresh F5 join: turn_start with no preceding USER_MESSAGE.

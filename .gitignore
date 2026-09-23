@@ -12,3 +12,6 @@ buddy.yml
 threads/
 .claude/skills/release-process/SKILL.md
 coverage/
+
+# claude4spec (auto-added)
+*.deprecated

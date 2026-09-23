@@ -83,8 +83,8 @@ export function handleSubagentCompleted(state: ChatState, event: SubagentComplet
   // content channel (tool_use/tool_result) and lifecycle channel (subagent_completed)
   // are unordered, so a subagent's results can still arrive after it reports done —
   // deleting the entry here made those late events either vanish or land in another
-  // subagent's panel via the `getActiveSubagent` fallback. `result.ts` clears the whole
-  // map at end of turn, so it can't grow unbounded.
+  // subagent's panel via the `getActiveSubagent` fallback. `done.ts` / `error.ts` clear
+  // the whole map at end of stream, so it can't grow unbounded.
   const sub = state.activeSubagents.get(event.taskId);
   const newSubagents = new Map(state.activeSubagents);
   if (sub) {

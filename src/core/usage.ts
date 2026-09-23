@@ -21,6 +21,17 @@ export function addUsage(a: UsageStats, b: UsageStats): UsageStats {
   return out;
 }
 
+/**
+ * Add one `result` frame's `usage` to a running total that may not exist yet.
+ * `usage` on a `result` covers that block alone, so a message's (and a
+ * stream's) usage is the sum over every `result` — used live by the reducer
+ * and on persistence by the server, so the two never drift apart.
+ */
+export function accumulateUsage(current: UsageStats | undefined, delta: UsageStats | undefined): UsageStats | undefined {
+  if (!delta) return current;
+  return current ? addUsage(current, delta) : delta;
+}
+
 export function sumUsage(...stats: UsageStats[]): UsageStats {
   return stats.reduce<UsageStats>((acc, s) => addUsage(acc, s), { ...ZERO });
 }

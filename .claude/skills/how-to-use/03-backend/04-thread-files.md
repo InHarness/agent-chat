@@ -103,7 +103,7 @@ A real minimal example (a fresh thread, one turn, no tools):
 | `title` | `create()` | yes (`PATCH /api/threads/:id`) | Free text; up to the UI. |
 | `architecture` | `create()` | yes via `update()` | Must be a key in `ServerConfig.architectures`. **Thread-level = *current* setting**, not authorship. See `StoredMessage.architecture` for per-message attribution. |
 | `model` | `create()` | yes via `update()` | Validated against the architecture's `models` list at request time, not at write time. Same authorship caveat as `architecture`. |
-| `sessionId` | first `result` event of a turn | overwritten each turn | Adapter-owned token. Carried back into the next prompt to keep the agent's session warm. |
+| `sessionId` | the stream's last `result` that carries one | overwritten each stream | Adapter-owned token. Carried back into the next prompt to keep the agent's session warm. |
 | `cwd` | `create()` | only via full `update()` | Passed straight to the agent process. |
 | `systemPrompt` / `maxTurns` / `architectureConfig` / `planMode` | `create()` (optional) | yes | Per-thread overrides of `ChatHandlerConfig` defaults. |
 | `createdAt` | `create()` | no | |
@@ -121,10 +121,11 @@ interface StoredMessage {
   timestamp: string;                // ISO 8601
   subagentTaskId?: string;          // set when this message was
                                     // produced inside a subagent
-  usage?: WireUsageStats;           // billing tokens for this assistant turn
-  contextSize?: number;             // post-turn context window utilization
-                                    //   (= usage.inputTokens + outputTokens).
-                                    //   Optional — older threads written before
+  usage?: WireUsageStats;           // billing tokens, summed over every
+                                    //   `result` this message received
+  contextSize?: number;             // context window utilization after the
+                                    //   message's LAST `result` (overwritten,
+                                    //   never summed). Optional — older threads written before
                                     //   this field exists read back as undefined;
                                     //   `storedMessageToChat` falls back to
                                     //   computing it from `usage`.
@@ -133,10 +134,14 @@ interface StoredMessage {
 }
 ```
 
-A turn writes **two** messages atomically (one rewrite of the file): the
-user message and the assistant message. The user message is what the
-client `POST`ed; the assistant message is built up from the stream and
-flushed at the end via `persistTurn()` (see `src/server/persistence.ts`).
+A stream is written **once**, right after its `done` frame, by a single
+`appendMessages()` call (one rewrite of the file). It holds a user +
+assistant pair for every turn the stream carried — the `POST`ed prompt,
+each mid-turn `user_message` and each merged queued follow-up — with each
+assistant message built up from every block of its turn. Until `done`,
+nothing from the stream is on disk: a client that disconnects mid-stream
+rejoins via `GET /api/chat/stream/:threadId` instead of reloading the
+thread.
 
 <!-- anchor: jq9t3ss2 -->
 ### `architecture` / `model` per message — audit trail
@@ -147,14 +152,14 @@ seed the next turn. They are *not* a faithful record of which model
 authored a given historical message: switching architectures mid-thread
 would otherwise rewrite history.
 
-To preserve that history, `persistTurn()` stamps the architecture and
-model that *this turn* actually used onto **both** the user and the
-assistant message:
+To preserve that history, the chat handler stamps the architecture and
+model that *this stream* actually used onto **both** messages of every
+pair it opens:
 
 ```ts
-// src/server/persistence.ts
-const stampedUser: StoredMessage      = { ...userMessage, architecture, model };
-const assistantMessage: StoredMessage = { id, role, blocks, timestamp, architecture, model, … };
+// src/server/handler.ts — openTurn()
+currentAssistant = { id: aId, role: 'assistant', blocks: assistantBlocks, timestamp, architecture, model };
+persisted.push({ ...uMsg, architecture, model }, currentAssistant);
 ```
 
 Implications:
@@ -284,7 +289,7 @@ All writes are **whole-file rewrites** via `writeFileSync`. Implications:
 | `GET /api/threads/:id` | `ThreadStore.get()` | Full file or `null`. |
 | `PATCH /api/threads/:id` | `ThreadStore.update()` | Rewrites; bumps `updatedAt`. |
 | `DELETE /api/threads/:id` | `ThreadStore.delete()` | `unlinkSync`. No tombstone. |
-| `POST /api/chat` (end of turn) | `persistTurn()` → `appendMessages()` | Appends user + assistant `StoredMessage`. |
+| `POST /api/chat` (after `done`) | `appendMessages()` | Appends a user + assistant `StoredMessage` pair per turn of the stream; overwrites `sessionId` with the stream's last `result` that carries one. |
 
 <!-- anchor: wxax83jw -->
 ## Replacing the store

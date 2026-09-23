@@ -10,13 +10,14 @@ import type {
   WireUsageStats,
   WireEvent,
 } from './protocol.js';
-import { serializeSSE, unifiedEventToWire } from './serialize.js';
+import { serializeSSE, unifiedEventToWire, errorToCode } from './serialize.js';
 import { validateChatRequest } from './validate.js';
 import { SessionManager } from './session-manager.js';
 import { QueueStore } from './queue-store.js';
 import { ThreadStore } from './thread-store.js';
 import { applyEventToStoredBlocks } from './blockReducer.js';
 import { resolveExecutionPlan, isResumeFailureError, buildReplayPromptForFallback } from './executionPlan.js';
+import { accumulateUsage } from '../core/usage.js';
 import { defaultLogger, type Logger } from '../utils/logger.js';
 
 export interface ChatHandlerConfig {
@@ -69,6 +70,17 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
   const defaultArchitecture = config.defaultArchitecture ?? Object.keys(architectures)[0];
   const validArchitectures = Object.keys(architectures);
   const pendingUserInputs = new Map<string, PendingUserInput>();
+
+  // Resolve a thread's still-pending user input prompts as 'cancel' so its
+  // adapter stream can unwind cleanly.
+  const cancelPendingUserInputs = (threadId: string): void => {
+    for (const [reqId, pending] of pendingUserInputs) {
+      if (pending.threadId === threadId) {
+        pending.resolve({ action: 'cancel' });
+        pendingUserInputs.delete(reqId);
+      }
+    }
+  };
 
   const handleChat = async (req: Request, res: Response): Promise<void> => {
     // Validate
@@ -159,8 +171,8 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
     };
 
     // Send connected + turn_start via broadcast so joiners see them in replay.
-    sessions.broadcast(threadId, 'connected', { requestId, threadId });
-    sessions.broadcast(threadId, 'turn_start', {
+    sessions.broadcastFrom(session, 'connected', { requestId, threadId });
+    sessions.broadcastFrom(session, 'turn_start', {
       userMessageId,
       assistantMessageId,
       prompt: chatReq.prompt,
@@ -194,103 +206,136 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
 
     openTurn(userMessage, assistantMessageId);
 
-    // Look up existing session for resumption and decide whether the next turn
-    // can resume it or needs a fresh session with the transcript replayed
-    // through the prompt. See executionPlan.ts for the rules.
-    const existingThread = threads.get(threadId);
-    const plan = resolveExecutionPlan({
-      existingThread,
-      requestedArchitecture: architecture,
-      requestedModel: model,
-      requestedSessionId: chatReq.sessionId,
-      prompt: chatReq.prompt,
-    });
-
-    // Resolve per-request options with thread → request → server fallbacks
-    const effectiveCwd = existingThread?.cwd ?? (chatReq.cwd ? resolve(chatReq.cwd) : undefined) ?? config.cwd ?? process.cwd();
-    const effectiveSystemPrompt = chatReq.systemPrompt ?? existingThread?.systemPrompt ?? config.systemPrompt;
-    const effectiveMaxTurns = chatReq.maxTurns ?? existingThread?.maxTurns;
-    const effectiveArchitectureConfig: Record<string, unknown> | undefined =
-      chatReq.architectureConfig ?? existingThread?.architectureConfig;
-    const effectivePlanMode = chatReq.planMode ?? existingThread?.planMode;
-
-    // Persist editable fields (systemPrompt, maxTurns, architectureConfig, planMode) for existing threads
-    if (existingThread) {
-      const updates: Record<string, unknown> = {};
-      if (chatReq.systemPrompt !== undefined) updates.systemPrompt = chatReq.systemPrompt;
-      if (chatReq.maxTurns !== undefined) updates.maxTurns = chatReq.maxTurns;
-      if (chatReq.architectureConfig !== undefined) updates.architectureConfig = chatReq.architectureConfig;
-      if (chatReq.planMode !== undefined) updates.planMode = chatReq.planMode;
-      if (plan.archChanged) updates.architecture = architecture;
-      if (plan.modelChanged) updates.model = model;
-      if (plan.requiresHistoryReplay) {
-        // Drop the stale sessionId now; the new adapter's `result.sessionId`
-        // will be persisted by persistTurn() at the end of this turn.
-        updates.sessionId = undefined;
-      }
-      if (Object.keys(updates).length > 0) {
-        threads.update(threadId, updates as Parameters<typeof threads.update>[1]);
-      }
-    }
-
-    const onUserInput = (request: UserInputRequest): Promise<UserInputResponse> => {
-      return new Promise<UserInputResponse>((resolvePromise) => {
-        pendingUserInputs.set(request.requestId, { resolve: resolvePromise, threadId: threadId! });
-      });
-    };
-
-    // Streaming-input mode keeps the SDK's input channel open so queued messages
-    // can be pushed into the live turn (mid-turn delivery). Opt-in per
-    // architecture capability; the one-shot path is unchanged for the rest.
-    const streamingInput = architectureCapabilities(architecture as Architecture).midTurnPush;
-
-    const baseExecuteArgs = {
-      systemPrompt: effectiveSystemPrompt,
-      model,
-      maxTurns: effectiveMaxTurns,
-      allowedTools: chatReq.allowedTools,
-      cwd: effectiveCwd,
-      architectureConfig: effectiveArchitectureConfig,
-      planMode: effectivePlanMode,
-      onUserInput,
-      ...(streamingInput ? { streamingInput: true } : {}),
-    };
-
-    const consumeStream = async (
-      executeArgs: Parameters<RuntimeAdapter['execute']>[0],
-    ): Promise<void> => {
-      const stream = adapter.execute(executeArgs);
-      for await (const event of stream) {
-        config.onEvent?.(event, requestId);
-
-        const wireEvent = unifiedEventToWire(event as UnifiedEvent & Record<string, unknown>);
-        sessions.broadcast(threadId, wireEvent.type, wireEvent);
-
-        if (wireEvent.type === 'user_message') {
-          // Mid-turn injection accepted into the live session: close the current
-          // assistant segment and open a new user→assistant pair so the persisted
-          // order mirrors what the model (and the UI) saw.
-          const um = wireEvent as Extract<WireEvent, { type: 'user_message' }>;
-          openTurn(
-            { id: crypto.randomUUID(), role: 'user', blocks: [{ type: 'text', text: um.text }], timestamp: um.timestamp },
-            crypto.randomUUID(),
-          );
-          continue;
-        }
-
-        // Collect blocks for persistence (targets the current assistant segment).
-        applyEventToStoredBlocks(assistantBlocks, event);
-
-        if (event.type === 'result') {
-          resultSessionId = event.sessionId;
-          currentAssistant.usage = event.usage;
-          currentAssistant.contextSize = event.contextSize;
-          if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
-        }
-      }
-    };
-
+    // Everything after the SSE headers runs inside this try: a throw during
+    // setup (thread lookup, execution plan, thread update) must still end the
+    // stream with `done` and release the thread's stream lock.
     try {
+      // Look up existing session for resumption and decide whether the next turn
+      // can resume it or needs a fresh session with the transcript replayed
+      // through the prompt. See executionPlan.ts for the rules.
+      const existingThread = threads.get(threadId);
+      const plan = resolveExecutionPlan({
+        existingThread,
+        requestedArchitecture: architecture,
+        requestedModel: model,
+        requestedSessionId: chatReq.sessionId,
+        prompt: chatReq.prompt,
+      });
+
+      // Resolve per-request options with thread → request → server fallbacks
+      const effectiveCwd = existingThread?.cwd ?? (chatReq.cwd ? resolve(chatReq.cwd) : undefined) ?? config.cwd ?? process.cwd();
+      const effectiveSystemPrompt = chatReq.systemPrompt ?? existingThread?.systemPrompt ?? config.systemPrompt;
+      const effectiveMaxTurns = chatReq.maxTurns ?? existingThread?.maxTurns;
+      const effectiveArchitectureConfig: Record<string, unknown> | undefined =
+        chatReq.architectureConfig ?? existingThread?.architectureConfig;
+      const effectivePlanMode = chatReq.planMode ?? existingThread?.planMode;
+
+      // Persist editable fields (systemPrompt, maxTurns, architectureConfig, planMode) for existing threads
+      if (existingThread) {
+        const updates: Record<string, unknown> = {};
+        if (chatReq.systemPrompt !== undefined) updates.systemPrompt = chatReq.systemPrompt;
+        if (chatReq.maxTurns !== undefined) updates.maxTurns = chatReq.maxTurns;
+        if (chatReq.architectureConfig !== undefined) updates.architectureConfig = chatReq.architectureConfig;
+        if (chatReq.planMode !== undefined) updates.planMode = chatReq.planMode;
+        if (plan.archChanged) updates.architecture = architecture;
+        if (plan.modelChanged) updates.model = model;
+        if (plan.requiresHistoryReplay) {
+          // Drop the stale sessionId now; the new adapter's `result.sessionId`
+          // is written by appendMessages() once the stream is done.
+          updates.sessionId = undefined;
+        }
+        if (Object.keys(updates).length > 0) {
+          threads.update(threadId, updates as Parameters<typeof threads.update>[1]);
+        }
+      }
+
+      const onUserInput = (request: UserInputRequest): Promise<UserInputResponse> => {
+        return new Promise<UserInputResponse>((resolvePromise) => {
+          pendingUserInputs.set(request.requestId, { resolve: resolvePromise, threadId: threadId! });
+        });
+      };
+
+      // Streaming-input mode keeps the SDK's input channel open so queued messages
+      // can be pushed into the live turn (mid-turn delivery). Opt-in per
+      // architecture capability; the one-shot path is unchanged for the rest.
+      const streamingInput = architectureCapabilities(architecture as Architecture).midTurnPush;
+
+      const baseExecuteArgs = {
+        systemPrompt: effectiveSystemPrompt,
+        model,
+        maxTurns: effectiveMaxTurns,
+        allowedTools: chatReq.allowedTools,
+        cwd: effectiveCwd,
+        architectureConfig: effectiveArchitectureConfig,
+        planMode: effectivePlanMode,
+        onUserInput,
+        ...(streamingInput ? { streamingInput: true } : {}),
+      };
+
+      // An adapter-level `error` event (as opposed to a thrown exception) ends
+      // the stream for the client: no queued turn runs after it.
+      let sawError = false;
+      // The stream is over once an adapter `error` was sent or Stop released
+      // the thread (`abort()` → `remove()`); no further turn may start.
+      const streamOver = (): boolean => sawError || session.removalTimer !== undefined;
+
+      const consumeStream = async (
+        executeArgs: Parameters<RuntimeAdapter['execute']>[0],
+      ): Promise<void> => {
+        const stream = adapter.execute(executeArgs);
+        for await (const event of stream) {
+          config.onEvent?.(event, requestId);
+
+          const wireEvent = unifiedEventToWire(event as UnifiedEvent & Record<string, unknown>);
+
+          // Nothing but `queue_updated` + `done` may follow an `error` on the
+          // wire. The adapter stream is still read to its end: some errors are
+          // not fatal to the adapter (codex surfaces runtime error items and
+          // carries on to its `result`), and that `result` holds the sessionId
+          // the next stream resumes. Only the sessionId is kept — content and
+          // usage the client never saw are not persisted either, so a reloaded
+          // thread matches what the hook held.
+          if (sawError) {
+            if (event.type === 'result' && event.sessionId) {
+              resultSessionId = event.sessionId;
+              sessions.setSessionId(requestId, resultSessionId);
+            }
+            continue;
+          }
+
+          sessions.broadcastFrom(session, wireEvent.type, wireEvent);
+          if (wireEvent.type === 'error') {
+            sawError = true;
+            continue;
+          }
+
+          if (wireEvent.type === 'user_message') {
+            // Mid-turn injection accepted into the live session: close the current
+            // assistant segment and open a new user→assistant pair so the persisted
+            // order mirrors what the model (and the UI) saw.
+            const um = wireEvent as Extract<WireEvent, { type: 'user_message' }>;
+            openTurn(
+              { id: crypto.randomUUID(), role: 'user', blocks: [{ type: 'text', text: um.text }], timestamp: um.timestamp },
+              crypto.randomUUID(),
+            );
+            continue;
+          }
+
+          // Collect blocks for persistence (targets the current assistant segment).
+          applyEventToStoredBlocks(assistantBlocks, event);
+
+          // A turn may carry several `result` frames (the adapter holds the
+          // session, wakes the model, closes another block). `usage` is per
+          // block — sum it; `contextSize` is a snapshot — overwrite it.
+          if (event.type === 'result') {
+            resultSessionId = event.sessionId ?? resultSessionId;
+            currentAssistant.usage = accumulateUsage(currentAssistant.usage, event.usage);
+            currentAssistant.contextSize = event.contextSize;
+            if (resultSessionId) sessions.setSessionId(requestId, resultSessionId);
+          }
+        }
+      };
+
       // First turn — with the codex-style resume-failure fallback.
       try {
         await consumeStream({
@@ -332,14 +377,15 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       // turn ran (push declined, or an architecture without mid-turn support) is
       // delivered now as a single merged turn that resumes the just-finished
       // session. Loop until the queue drains.
-      let batch = queue.popAll(threadId);
+      // After an adapter `error` or Stop, no further turn runs.
+      let batch = streamOver() ? [] : queue.popAll(threadId);
       while (batch.length > 0) {
-        sessions.broadcast(threadId, 'queue_updated', { queued: [] });
+        sessions.broadcastFrom(session, 'queue_updated', { queued: [] });
         const merged = mergeQueuedPrompts(batch);
         const uId = crypto.randomUUID();
         const aId = crypto.randomUUID();
         const ts = new Date().toISOString();
-        sessions.broadcast(threadId, 'turn_start', {
+        sessions.broadcastFrom(session, 'turn_start', {
           userMessageId: uId,
           assistantMessageId: aId,
           prompt: merged,
@@ -351,34 +397,40 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
           prompt: merged,
           resumeSessionId: resultSessionId,
         });
-        batch = queue.popAll(threadId);
+        batch = streamOver() ? [] : queue.popAll(threadId);
+      }
+
+      // An adapter `error` ended the stream with messages still queued. Nothing
+      // would deliver them (enqueue needs a live stream), and the next POST would
+      // run them AFTER its own prompt. Hand them back instead, like Stop does:
+      // `queue_cleared` carries the texts for the composer to restore.
+      if (sawError) {
+        const texts = queue.clear(threadId).map(m => m.text);
+        if (texts.length > 0) sessions.broadcastFrom(session, 'queue_cleared', { texts });
       }
     } catch (err) {
       const wireError = {
         type: 'error' as const,
         error: (err as Error).message ?? String(err),
-        code: 'UNKNOWN',
+        code: errorToCode(err),
       };
-      sessions.broadcast(threadId, 'error', wireError);
+      sessions.broadcastFrom(session, 'error', wireError);
     } finally {
-      sessions.broadcast(threadId, 'done', {});
+      // A turn that errored before its queued messages were delivered leaves rows
+      // behind; emit a fresh snapshot so the UI stops showing them as in-flight.
+      // Sent BEFORE `done`: `done` is always the stream's last frame.
+      sessions.broadcastFrom(session, 'queue_updated', { queued: queue.snapshot(threadId) });
+      sessions.broadcastFrom(session, 'done', {});
       try { res.end(); } catch { /* ignore */ }
       sessions.remove(requestId);
 
-      // Resolve any still-pending user input prompts for this thread as
-      // 'cancel' so the adapter stream can unwind cleanly.
-      for (const [reqId, pending] of pendingUserInputs) {
-        if (pending.threadId === threadId) {
-          pending.resolve({ action: 'cancel' });
-          pendingUserInputs.delete(reqId);
-        }
+      cancelPendingUserInputs(threadId);
+
+      try {
+        threads.appendMessages(threadId, persisted, resultSessionId);
+      } catch (err) {
+        logger.warn('handler.handleChat.persist', err);
       }
-
-      // A turn that errored before its queued messages were delivered leaves rows
-      // behind; emit a fresh snapshot so the UI stops showing them as in-flight.
-      sessions.broadcast(threadId, 'queue_updated', { queued: queue.snapshot(threadId) });
-
-      threads.appendMessages(threadId, persisted, resultSessionId);
     }
   };
 
@@ -485,6 +537,9 @@ export function createChatHandler(config: ChatHandlerConfig): ChatHandler {
       res.status(404).json({ error: 'No active request with that ID' });
       return;
     }
+    // An adapter parked on `onUserInput` cannot unwind to `done` until its
+    // prompt resolves — cancel them so the aborted stream can end.
+    if (threadId) cancelPendingUserInputs(threadId);
     // D4: Stop is a full stop — clear the queue and return the texts so the
     // composer can restore them. Also broadcast `queue_cleared` for any OTHER
     // live-join clients of this thread (the aborting client closes its own SSE,

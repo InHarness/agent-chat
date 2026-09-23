@@ -1,5 +1,6 @@
 import type { ChatState, ChatMessage } from '../../types.js';
 import type { WireEvent } from '../../server/protocol.js';
+import { finalizeActiveMessage, teardownStream } from './_shared.js';
 
 type TurnStartEvent = Extract<WireEvent, { type: 'turn_start' }>;
 
@@ -10,10 +11,12 @@ export function handleTurnStart(state: ChatState, event: TurnStartEvent): ChatSt
   // server is now broadcasting its own UUIDs for the same turn. Adopt server
   // IDs onto the existing user+assistant pair so persistence and follow-up
   // events (which reference server IDs) line up. ID equality cannot detect
-  // this — client and server pick UUIDs independently — so we rely on
-  // `activeAssistantMessageId !== null`, which is set by USER_MESSAGE and
-  // cleared by result/error/RESTORE/CLEAR.
-  if (state.activeAssistantMessageId !== null) {
+  // this — client and server pick UUIDs independently — so USER_MESSAGE
+  // records the optimistic id and only the first turn_start adopts it.
+  if (
+    state.activeAssistantMessageId !== null &&
+    state.activeAssistantMessageId === state.optimisticAssistantMessageId
+  ) {
     const aIdx = state.messages.findIndex(m => m.id === state.activeAssistantMessageId);
     if (aIdx > 0 && state.messages[aIdx - 1]?.role === 'user') {
       const messages = state.messages.slice();
@@ -23,12 +26,24 @@ export function handleTurnStart(state: ChatState, event: TurnStartEvent): ChatSt
         ...state,
         messages,
         activeAssistantMessageId: event.assistantMessageId,
+        optimisticAssistantMessageId: null,
         isStreaming: true,
         error: null,
       };
     }
   }
-  // Fresh join (e.g. F5 during an in-flight stream): synthesize both messages.
+  // A turn the thread already holds: a reload (RESTORE) right after the stream
+  // ended, then a join inside the server's post-`done` grace window, replays
+  // turns that are already on disk. Leave no message active, so the reducer
+  // drops the turn's frames (see `dispatchEvent`) instead of appending a
+  // duplicate pair — and its `result` is not counted a second time.
+  if (state.messages.some(m => m.id === event.assistantMessageId)) {
+    return state.activeAssistantMessageId === null ? state : teardownStream(state);
+  }
+  // A further turn on the same stream (queued messages dispatched after the
+  // previous turn), or a fresh join (e.g. F5 during an in-flight stream):
+  // finish whatever is active and append a new pair — never rewrite the ids
+  // of a finished one.
   const userMsg: ChatMessage = {
     id: event.userMessageId,
     role: 'user',
@@ -43,10 +58,13 @@ export function handleTurnStart(state: ChatState, event: TurnStartEvent): ChatSt
     timestamp: event.timestamp,
     isStreaming: true,
   };
+  const hadActive = state.activeAssistantMessageId !== null;
   return {
     ...state,
-    messages: [...state.messages, userMsg, assistantMsg],
+    messages: [...finalizeActiveMessage(state.messages, state.activeAssistantMessageId), userMsg, assistantMsg],
     activeAssistantMessageId: event.assistantMessageId,
+    optimisticAssistantMessageId: null,
+    ...(hadActive ? { activeSubagents: new Map() } : {}),
     isStreaming: true,
     error: null,
   };
