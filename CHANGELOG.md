@@ -2,7 +2,7 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
-## [0.4.0] — Unreleased
+## [0.4.0] — 2026-09-23
 
 Adapters that hold the session after handing control back (claude-code via agent-adapters 0.9.13 keeps it open while subagents or background tasks finish, then wakes the model and emits another `result`) now work end to end. The wire frames keep their shape; what changed is what they mean. See "Migrating from the single-`result` contract" in the chat protocol spec (`03-backend/03-chat-protocol.md`).
 
@@ -119,6 +119,7 @@ Never published to npm; its changes first ship in 0.3.4.
 - Server serialization errors now produce clearer messages.
 - README expanded with instant-usage instructions, endpoint configuration docs, and component examples.
 
+[0.4.0]: https://github.com/InHarness/agent-chat/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/InHarness/agent-chat/compare/v0.3.2...v0.3.4
 [0.3.2]: https://github.com/InHarness/agent-chat/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/InHarness/agent-chat/compare/v0.3.0...v0.3.1
