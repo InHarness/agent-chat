@@ -84,7 +84,7 @@ Server-side requirements:
 | Requirement | Notes |
 |---|---|
 | Node | ≥ 18 (native `fetch`, web streams) |
-| `@inharness-ai/agent-adapters` | matching major — registers architectures (Claude Code, Codex, Gemini, OpenCode) |
+| `@inharness-ai/agent-adapters` | `^0.9.13` — registers architectures (Claude Code, Codex, Gemini, OpenCode) |
 | HTTP framework | Express, NestJS, Fastify, Koa, Hono, Next.js route handlers, raw `http` — anything that can call a `(req, res)` function |
 | API key env var | One of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, … per architecture you enable |
 

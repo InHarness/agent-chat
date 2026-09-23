@@ -2,6 +2,18 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.3.4] — Unreleased
+
+### Changed
+- Requires `@inharness-ai/agent-adapters` `^0.9.13` (was `^0.9.0`). 0.9.10–0.9.12 were never published, so this is the first published version carrying subagent re-entry (`resumed: true`, handled since 0.3.3).
+- The `error` wire event gets a dedicated `code` for every terminal error class agent-adapters exports. They used to fall through to `UNKNOWN`: `IDLE_TIMEOUT` (`AdapterIdleTimeoutError`), `TOOL_CALL_TIMEOUT` (`AdapterToolCallTimeoutError`), `SUBAGENT_TIMEOUT` (`AdapterSubagentTimeoutError`), `BACKGROUND_HOLD_EXPIRED` (`AdapterBackgroundHoldExpiredError`), `TOOL_POLICY` (`AdapterToolPolicyError`). The three timeout classes are siblings of `AdapterTimeoutError`, not subclasses, so `ADAPTER_TIMEOUT` still means only the `timeoutMs` backstop. The handler still passes none of the new per-unit timeouts to `execute()`, so none of those clocks is armed by agent-chat itself.
+
+### Fixed
+- A subagent closed with `status: 'aborted'` (agent-adapters flushes open subagents when a run ends by abort, timeout or hold-cap expiry) or `'stopped'` no longer renders with the failure mark ✕. `SubagentPanel` shows ⊘; `data-status` carries the raw value as before.
+
+### Notes
+- agent-adapters 0.9.13 changed the claude-code background hold: a parked stretch whose only unsettled work is a background subagent is now cut at `claude_backgroundHoldCapMs` (default 90s), however busy the subagent is. It surfaces as `BACKGROUND_HOLD_EXPIRED`. Raise the cap via `architectureConfig` if your subagents outlive the turn.
+
 ## [0.3.3] — 2026-09-22
 
 ### Fixed

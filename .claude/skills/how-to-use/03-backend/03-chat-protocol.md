@@ -87,7 +87,7 @@ The `WireEvent` union (from `src/server/protocol.ts`):
 | `tool_result` | tool returned | `toolUseId`, `summary` (the truncated text). |
 | `todo_list_updated` | agent's TODO snapshot changed | `items`, `source`. |
 | `assistant_message` | end of an assistant message | full `WireNormalizedMessage` (used for persistence, mirrored to disk). |
-| `subagent_started` / `_progress` / `_completed` | nested task lifecycle | `taskId`, status payloads. |
+| `subagent_started` / `_progress` / `_completed` | nested task lifecycle | `taskId`, status payloads. `subagent_completed.status` is `completed`, `failed`, `aborted` (closed because the whole run ended) or `stopped` (ended on its own while the run went on). |
 | `user_input_request` | MCP elicitation | `request`. |
 | `user_input_response` | client answered | `requestId`, `response`. |
 | `result` | turn finished cleanly | `output`, `usage` (billing — sum across turns), `contextSize` (context window — take last turn only), `sessionId?`. |
@@ -103,7 +103,12 @@ Type guards (`isTextDeltaEvent`, `isResultEvent`, …) are exported from
 
 | `code` | Meaning |
 |---|---|
-| `ADAPTER_TIMEOUT` | Adapter exceeded its own timeout. |
+| `ADAPTER_TIMEOUT` | The run outlived its `timeoutMs` backstop. |
+| `IDLE_TIMEOUT` | `idleTimeoutMs` expired: the run went quiet while nothing was outstanding. |
+| `TOOL_CALL_TIMEOUT` | One tool call did not return within `toolCallTimeoutMs`. |
+| `SUBAGENT_TIMEOUT` | One subagent reported no progress within `subagentTimeoutMs`. |
+| `BACKGROUND_HOLD_EXPIRED` | claude-code: after the turn's `result`, no tracked background task reported within `claude_backgroundHoldCapMs` (default 90s) while work was still unsettled. Since agent-adapters 0.9.13 a background **subagent** outliving the turn does not keep the hold alive, however busy it is — raise the cap in `architectureConfig` (or set it to `null`) if yours do. |
+| `TOOL_POLICY` | The requested tool gating cannot be enforced on this adapter. |
 | `ABORTED` | Client posted to `/api/chat/abort` (or disconnected). |
 | `INIT_ERROR` | Adapter failed to initialize (bad credentials, missing binary). |
 | `ADAPTER_ERROR` | Generic adapter failure. |
