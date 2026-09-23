@@ -2,7 +2,7 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
-## [0.3.4] — Unreleased
+## [0.3.4] — 2026-09-23
 
 ### Changed
 - Requires `@inharness-ai/agent-adapters` `^0.9.13` (was `^0.9.0`). 0.9.10–0.9.12 were never published, so this is the first published version carrying subagent re-entry (`resumed: true`, handled since 0.3.3).
@@ -15,6 +15,8 @@ All notable changes to `@inharness-ai/agent-chat` are documented here. Format ba
 - agent-adapters 0.9.13 changed the claude-code background hold: a parked stretch whose only unsettled work is a background subagent is now cut at `claude_backgroundHoldCapMs` (default 90s), however busy the subagent is. It surfaces as `BACKGROUND_HOLD_EXPIRED`. Raise the cap via `architectureConfig` if your subagents outlive the turn.
 
 ## [0.3.3] — 2026-09-22
+
+Never published to npm; its changes first ship in 0.3.4.
 
 ### Fixed
 - Re-entered subagents no longer spawn a duplicate panel. Since `@inharness-ai/agent-adapters` 0.9.12 a subagent resumed via `SendMessage` opens another lifecycle cycle under the **same** `taskId`: a second `subagent_started` (with `resumed: true`) followed by its own `subagent_completed`. Both reducers (client `handleSubagentStarted` and server `applyEventToStoredBlocks`) now resume the existing block in the current turn — status back to `running`; the original `toolUseId` (so the panel stays paired with the tool card that spawned the agent), description and summary kept — instead of appending a second block. The last `subagent_completed` for the `taskId` sets the status; it replaces the summary only when it carries one, so a re-entry that ends without a report does not erase the first cycle's. A re-entry in a later turn still opens a fresh panel in that turn's message.
@@ -88,6 +90,8 @@ All notable changes to `@inharness-ai/agent-chat` are documented here. Format ba
 - Server serialization errors now produce clearer messages.
 - README expanded with instant-usage instructions, endpoint configuration docs, and component examples.
 
+[0.3.4]: https://github.com/InHarness/agent-chat/compare/v0.3.2...v0.3.4
+[0.3.2]: https://github.com/InHarness/agent-chat/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/InHarness/agent-chat/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/InHarness/agent-chat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/InHarness/agent-chat/compare/v0.1.1...v0.2.0
