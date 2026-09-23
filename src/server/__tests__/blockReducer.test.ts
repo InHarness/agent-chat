@@ -251,6 +251,15 @@ describe('applyEventToStoredBlocks — subagent lifecycle', () => {
     expect(sub.usage).toEqual({ inputTokens: 5, outputTokens: 7 });
   });
 
+  it('subagent_completed keeps the raw status, including aborted (agent-adapters ≥0.9.13 flush)', () => {
+    const blocks: StoredContentBlock[] = [];
+    applyAll(blocks, [
+      { type: 'subagent_started', taskId: 'sub-1', description: 'd', toolUseId: 'tu1' },
+      { type: 'subagent_completed', taskId: 'sub-1', status: 'aborted' },
+    ]);
+    expect((blocks[0] as SubagentBlock).status).toBe('aborted');
+  });
+
   it('subagent_completed without prior subagent_started is a no-op', () => {
     const blocks: StoredContentBlock[] = [];
     applyAll(blocks, [

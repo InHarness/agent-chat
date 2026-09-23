@@ -90,9 +90,11 @@ export function handleSubagentCompleted(state: ChatState, event: SubagentComplet
   if (sub) {
     newSubagents.set(event.taskId, {
       ...sub,
-      // Wire `status` is an open string; SubagentState's is a union. Anything that
-      // isn't an explicit failure counts as completed — what matters is that it is
-      // no longer 'running', so the fallback keeps excluding it.
+      // Wire `status` is an open string (agent-adapters declares 'completed' |
+      // 'failed' | 'aborted' | 'stopped'); SubagentState's is a narrower union.
+      // Anything that isn't an explicit failure counts as completed here — what
+      // matters is that it is no longer 'running', so the fallback keeps
+      // excluding it. The block itself keeps the raw status for rendering.
       status: event.status === 'failed' ? 'failed' : 'completed',
       summary: event.summary ?? sub.summary,
     });

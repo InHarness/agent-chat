@@ -77,6 +77,13 @@ function errorToCode(err: unknown): string {
   if (!err || typeof err !== 'object') return 'UNKNOWN';
   const name = (err as { name?: string }).name ?? '';
   if (name === 'AdapterTimeoutError') return 'ADAPTER_TIMEOUT';
+  // Siblings of AdapterTimeoutError, not subclasses (agent-adapters ≥0.9.13):
+  // each names a different bound, so each gets its own code.
+  if (name === 'AdapterIdleTimeoutError') return 'IDLE_TIMEOUT';
+  if (name === 'AdapterToolCallTimeoutError') return 'TOOL_CALL_TIMEOUT';
+  if (name === 'AdapterSubagentTimeoutError') return 'SUBAGENT_TIMEOUT';
+  if (name === 'AdapterBackgroundHoldExpiredError') return 'BACKGROUND_HOLD_EXPIRED';
+  if (name === 'AdapterToolPolicyError') return 'TOOL_POLICY';
   if (name === 'AdapterAbortError') return 'ABORTED';
   if (name === 'AdapterInitError') return 'INIT_ERROR';
   if (name === 'AdapterError') return 'ADAPTER_ERROR';
