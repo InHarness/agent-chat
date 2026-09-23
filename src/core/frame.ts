@@ -95,12 +95,22 @@ export function withFrame(
   // nothing. No handler currently returns an unchanged frame, so this is an
   // invariant for future ones rather than a live optimization — but a reducer
   // that silently breaks referential equality is a memoization trap.
+  //
+  // Content lands in exactly ONE panel: the last subagent block for the taskId. A
+  // re-entered subagent resumes its existing block (see `subagentLifecycle.ts`), so
+  // there is normally only one; targeting the last is the defensive tie-break.
   let messagesChanged = false;
   const messages = state.messages.map(msg => {
     if (msg.id !== state.activeAssistantMessageId) return msg;
+    let targetIdx = -1;
+    for (let i = msg.blocks.length - 1; i >= 0; i--) {
+      const b = msg.blocks[i];
+      if (b.type === 'subagent' && b.taskId === sub.taskId) { targetIdx = i; break; }
+    }
+    if (targetIdx < 0) return msg;
     let blocksChanged = false;
-    const blocks = msg.blocks.map(b => {
-      if (b.type !== 'subagent' || b.taskId !== sub.taskId) return b;
+    const blocks = msg.blocks.map((b, i) => {
+      if (i !== targetIdx || b.type !== 'subagent') return b;
       const out = fn(getSubagentFrame(b.messages));
       if (out.messages === b.messages) return b;
       blocksChanged = true;
