@@ -37,6 +37,15 @@ describe('consumeWireStream', () => {
     expect(events.map(e => e.type)).toEqual(['done']);
   });
 
+  it('hands onConnected the whole connected frame, extra fields included', async () => {
+    const frames: unknown[] = [];
+    await consumeWireStream(
+      sseResponse([['connected', { requestId: 'r', threadId: 't', replayTruncated: true }], ['done', {}]]),
+      { onEvent: () => {}, onConnected: (_r, _t, frame) => frames.push(frame) },
+    );
+    expect(frames).toEqual([{ requestId: 'r', threadId: 't', replayTruncated: true }]);
+  });
+
   it('delivers a synthetic done when the connection closes without one', async () => {
     const events: WireEvent[] = [];
     await consumeWireStream(

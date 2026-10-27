@@ -34,7 +34,7 @@ export { UsageDisplay } from './components/UsageDisplay.js';
 export { useAgentChat } from './hooks/useAgentChat.js';
 export { useMessageReducer, messageReducer, createInitialState } from './hooks/useMessageReducer.js';
 export { useEventStream } from './hooks/useEventStream.js';
-export type { StreamEndpoints } from './hooks/useEventStream.js';
+export type { StreamEndpoints, ConnectedFrame } from './hooks/useEventStream.js';
 export { useAgentConfig } from './hooks/useAgentConfig.js';
 export { useThreads } from './hooks/useThreads.js';
 export type { ThreadsEndpoints } from './hooks/useThreads.js';
