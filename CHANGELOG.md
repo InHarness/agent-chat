@@ -2,6 +2,11 @@
 
 All notable changes to `@inharness-ai/agent-chat` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [0.4.1] — 2026-10-27
+
+### Added
+- `onConnected` gets a third argument, `frame`: the whole `connected` frame as the server sent it (new exported type `ConnectedFrame`). Consumers can read extra fields such as `replayTruncated`, which a server sets on a live-join whose replay buffer was trimmed. Additive: two-argument callbacks keep working. Applies to `useEventStream` and `consumeWireStream`.
+
 ## [0.4.0] — 2026-09-23
 
 Adapters that hold the session after handing control back (claude-code via agent-adapters 0.9.13 keeps it open while subagents or background tasks finish, then wakes the model and emits another `result`) now work end to end. The wire frames keep their shape; what changed is what they mean. See "Migrating from the single-`result` contract" in the chat protocol spec (`03-backend/03-chat-protocol.md`).
@@ -126,3 +131,4 @@ Never published to npm; its changes first ship in 0.3.4.
 [0.3.0]: https://github.com/InHarness/agent-chat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/InHarness/agent-chat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/InHarness/agent-chat/compare/v0.1.0...v0.1.1
+[0.4.1]: https://github.com/InHarness/agent-chat/compare/v0.4.0...v0.4.1
