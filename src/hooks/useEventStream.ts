@@ -23,11 +23,23 @@ export interface StreamEndpoints {
   queueClear?: (threadId: string) => string;
 }
 
+/**
+ * The `connected` frame as the server sent it. `requestId` and `threadId` are
+ * always there; anything else the server adds (e.g. `replayTruncated` on a
+ * live-join whose replay buffer was trimmed) is passed through untouched.
+ */
+export interface ConnectedFrame {
+  requestId: string;
+  threadId: string;
+  [field: string]: unknown;
+}
+
 interface StreamOptions {
   serverUrl: string;
   onEvent: (event: WireEvent) => void;
   onError: (error: Error) => void;
-  onConnected?: (requestId: string, threadId: string) => void;
+  /** The stream is open. `frame` is the whole `connected` frame, extra fields included. */
+  onConnected?: (requestId: string, threadId: string, frame: ConnectedFrame) => void;
   /**
    * A dropped connection could not be resumed because the stream already
    * ended on the server (its replay window has closed). The thread on disk
@@ -106,7 +118,7 @@ export async function consumeWireStream(
   response: Response,
   handlers: {
     onEvent: (event: WireEvent) => void;
-    onConnected?: (requestId: string, threadId: string) => void;
+    onConnected?: (requestId: string, threadId: string, frame: ConnectedFrame) => void;
     onParseError?: (err: unknown) => void;
   },
   progress: StreamProgress = {},
@@ -118,7 +130,7 @@ export async function consumeWireStream(
       const parsed = JSON.parse(data);
       if (event === 'connected') {
         progress.threadId = parsed.threadId;
-        handlers.onConnected?.(parsed.requestId, parsed.threadId);
+        handlers.onConnected?.(parsed.requestId, parsed.threadId, parsed as ConnectedFrame);
       } else if (event === 'done') {
         sawDone = true;
         handlers.onEvent({ type: 'done' });
@@ -208,9 +220,9 @@ export function useEventStream(options: StreamOptions) {
     signal: controller.signal,
     handlers: {
       onEvent: options.onEvent,
-      onConnected: (requestId, threadId) => {
+      onConnected: (requestId, threadId, frame) => {
         requestIdRef.current = requestId;
-        options.onConnected?.(requestId, threadId);
+        options.onConnected?.(requestId, threadId, frame);
       },
       onParseError: (err) => logger.warn(`useEventStream.${context}.parse`, err),
     },
